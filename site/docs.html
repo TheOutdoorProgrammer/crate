@@ -242,6 +242,8 @@
       color: var(--accent);
     }
 
+    pre.code-block { margin: 0; white-space: pre; }
+
     .code-block {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -392,17 +394,17 @@
 
       <p>The recommended deployment is via Docker Compose with slskd as a sidecar. Crate needs a Soulseek account (provided through slskd) to download music.</p>
 
-      <div class="code-block"><span class="comment"># docker-compose.yml</span>
+      <pre class="code-block"><code><span class="comment"># docker-compose.yml</span>
 <span class="cmd">services:</span>
   <span class="cmd">crate:</span>
-    <span class="cmd">image: ghcr.io/theoutdoorprogrammer/crate:latest</span>
-    ports:
+    <span class="cmd">image:</span> ghcr.io/theoutdoorprogrammer/crate:latest
+    <span class="cmd">ports:</span>
       - <span class="val">"6969:6969"</span>
-    volumes:
+    <span class="cmd">volumes:</span>
       - ./crate-data:/app/data        <span class="comment"># databases (crate.db, cache.db, activity.db)</span>
       - ./slskd/downloads:/app/downloads
       - ./library:/app/library
-    environment:
+    <span class="cmd">environment:</span>
       - CRATE_SLSKD_URL=<span class="val">http://slskd:5030</span>
       - CRATE_SLSKD_API_KEY=<span class="val">your_api_key</span>
       - CRATE_DOWNLOADS_DIR=<span class="val">/app/downloads</span>
@@ -410,23 +412,23 @@
       - CRATE_DB_PATH=<span class="val">/app/data/crate.db</span>
       - CRATE_CACHE_PATH=<span class="val">/app/data/cache.db</span>
       - CRATE_ACTIVITY_PATH=<span class="val">/app/data/activity.db</span>
-    depends_on:
+    <span class="cmd">depends_on:</span>
       - slskd
-    restart: unless-stopped
+    <span class="cmd">restart:</span> unless-stopped
 
   <span class="cmd">slskd:</span>
-    <span class="cmd">image: slskd/slskd:latest</span>
-    ports:
+    <span class="cmd">image:</span> slskd/slskd:latest
+    <span class="cmd">ports:</span>
       - <span class="val">"5030:5030"</span>
-    volumes:
+    <span class="cmd">volumes:</span>
       - ./slskd:/app
       - ./library:/crate
-    environment:
+    <span class="cmd">environment:</span>
       - SLSKD_REMOTE_CONFIGURATION=<span class="val">true</span>
       - SLSKD_API_KEY=<span class="val">your_api_key</span>
       - SLSKD_SOULSEEK_USERNAME=<span class="val">your_username</span>
       - SLSKD_SOULSEEK_PASSWORD=<span class="val">your_password</span>
-    restart: unless-stopped</div>
+    <span class="cmd">restart:</span> unless-stopped</code></pre>
 
       <div class="callout">
         <strong>Tip:</strong> The <code>CRATE_SLSKD_API_KEY</code> must match the <code>SLSKD_API_KEY</code> you set for slskd. These two services communicate over the slskd REST API.
@@ -661,11 +663,11 @@
       <h3>Provider Configuration</h3>
       <p>The <code>CRATE_PROVIDERS</code> environment variable defines which providers to load. Format:</p>
 
-      <div class="code-block"><span class="comment"># Built-in providers (binary path relative to crate binary)</span>
+      <pre class="code-block"><code><span class="comment"># Built-in providers (binary path relative to crate binary)</span>
 <span class="cmd">CRATE_PROVIDERS</span>=<span class="val">musicbrainz:./provider-musicbrainz:50051,deezer:./provider-deezer:50052</span>
 
 <span class="comment"># External provider (network address instead of binary path)</span>
-<span class="cmd">CRATE_PROVIDERS</span>=<span class="val">musicbrainz:./provider-musicbrainz:50051,spotify:external:192.168.1.10:50053</span></div>
+<span class="cmd">CRATE_PROVIDERS</span>=<span class="val">musicbrainz:./provider-musicbrainz:50051,spotify:external:192.168.1.10:50053</span></code></pre>
 
       <p>Built-in providers are started as child processes by Crate. External providers connect to a remote gRPC server you run separately.</p>
 
@@ -881,7 +883,7 @@
 
       <p>Run your provider as a standalone gRPC server and add it to the <code>CRATE_PROVIDERS</code> env var:</p>
 
-      <div class="code-block"><span class="cmd">CRATE_PROVIDERS</span>=<span class="val">musicbrainz:./provider-musicbrainz:50051,my-provider:external:my-host:50053</span></div>
+      <pre class="code-block"><code><span class="cmd">CRATE_PROVIDERS</span>=<span class="val">musicbrainz:./provider-musicbrainz:50051,my-provider:external:my-host:50053</span></code></pre>
 
       <p>Use the <code>external</code> keyword as the binary path to tell Crate it should connect to a remote server instead of launching a child process. Community-built providers and the database schema are documented in <a href="https://github.com/TheOutdoorProgrammer/crate/blob/main/DATABASE.md">DATABASE.md</a>.</p>
 
