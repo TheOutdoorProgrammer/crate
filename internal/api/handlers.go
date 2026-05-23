@@ -771,9 +771,9 @@ func (s *Server) handleClearDownloadsByStatus(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "status parameter required")
 		return
 	}
-	allowed := map[string]bool{"failed": true, "complete": true}
+	allowed := map[string]bool{"failed": true, "complete": true, "pending": true}
 	if !allowed[status] {
-		writeError(w, http.StatusBadRequest, "can only clear failed or complete downloads")
+		writeError(w, http.StatusBadRequest, "can only clear failed, complete, or pending downloads")
 		return
 	}
 	deleted, err := s.queries.DeleteDownloadsByStatus(status)

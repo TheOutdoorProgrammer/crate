@@ -13,14 +13,7 @@ export default function Downloads() {
   const { data: downloads, isLoading } = useQuery({
     queryKey: ['downloads'],
     queryFn: () => api.listDownloads(),
-    refetchInterval: (query) => {
-      const dl = query.state.data;
-      if (!dl) return 5000;
-      const hasActive = dl.some((d: DownloadQueueItem) =>
-        d.status === 'pending' || d.status === 'searching' || d.status === 'downloading' || d.status === 'organizing'
-      );
-      return hasActive ? 5000 : false;
-    },
+    refetchInterval: 5000,
   });
 
   const hasActiveDownloads = downloads?.some(
@@ -72,12 +65,24 @@ export default function Downloads() {
 
   const dismiss = useMutation({
     mutationFn: (id: number) => api.deleteDownload(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ['downloads'] });
+      queryClient.setQueryData(['downloads'], (old: DownloadQueueItem[] | undefined) =>
+        old?.filter((d) => d.id !== id)
+      );
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   });
 
   const clearByStatus = useMutation({
     mutationFn: (status: string) => api.clearDownloadsByStatus(status),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
+    onMutate: async (status) => {
+      await queryClient.cancelQueries({ queryKey: ['downloads'] });
+      queryClient.setQueryData(['downloads'], (old: DownloadQueueItem[] | undefined) =>
+        old?.filter((d) => d.status !== status)
+      );
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   });
 
   const active = downloads?.filter((d) => d.status === 'downloading' || d.status === 'searching') ?? [];
@@ -167,7 +172,7 @@ export default function Downloads() {
             </Section>
           )}
           {pending.length > 0 && (
-            <Section title="Pending">
+            <Section title="Pending" onClear={() => clearByStatus.mutate('pending')} clearLabel="Clear All">
               {pending.map((dl) => <DownloadRow key={dl.id} dl={dl} onRetry={retry.mutate} onDismiss={dismiss.mutate} />)}
             </Section>
           )}
@@ -294,7 +299,7 @@ function DownloadRow({ dl, onRetry, onDismiss }: { dl: DownloadQueueItem; onRetr
           Retry
         </button>
       )}
-      {(dl.status === 'failed' || dl.status === 'complete') && (
+      {(dl.status === 'failed' || dl.status === 'complete' || dl.status === 'pending') && (
         <button
           onClick={() => onDismiss(dl.id)}
           className="text-zinc-600 active:text-red-400 transition-colors shrink-0"
