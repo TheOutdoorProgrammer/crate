@@ -1,0 +1,300 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../api/client';
+import { useToast } from '../components/Toast';
+
+interface QualityTier {
+  format: string;
+  min_bitrate?: number;
+  label: string;
+}
+
+const settingsSections = [
+  {
+    title: 'slskd Connection',
+    fields: [
+      { key: 'slskd_url', label: 'URL', placeholder: 'http://localhost:5030' },
+      { key: 'slskd_api_key', label: 'API Key', placeholder: 'Your slskd API key', type: 'password' },
+    ],
+  },
+  {
+    title: 'Library',
+    fields: [
+      { key: 'library_path', label: 'Library Path', placeholder: '/music' },
+      { key: 'download_format_preference', label: 'Format Preference', placeholder: 'flac,mp3' },
+      { key: 'min_bitrate', label: 'Min Bitrate (kbps)', placeholder: '256' },
+    ],
+  },
+  {
+    title: 'Navidrome (optional)',
+    fields: [
+      { key: 'navidrome_url', label: 'URL', placeholder: 'http://localhost:4533' },
+      { key: 'navidrome_user', label: 'Username', placeholder: 'admin' },
+      { key: 'navidrome_password', label: 'Password', placeholder: 'Navidrome password', type: 'password' },
+    ],
+  },
+  {
+    title: 'Scheduling',
+    fields: [
+      { key: 'scan_interval', label: 'Scan Interval', placeholder: '6h' },
+      { key: 'cache_ttl_hours', label: 'Cache TTL (hours)', placeholder: '24' },
+      { key: 'activity_retention_days', label: 'Activity Retention (days)', placeholder: '30' },
+    ],
+  },
+];
+
+export default function Settings() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [saved, setSaved] = useState(false);
+  const [tiers, setTiers] = useState<QualityTier[]>([]);
+
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.getSettings,
+  });
+
+  const { data: status } = useQuery({
+    queryKey: ['status'],
+    queryFn: api.getStatus,
+  });
+
+  const { data: providers } = useQuery({
+    queryKey: ['providers'],
+    queryFn: api.listProviders,
+    refetchInterval: 30_000,
+  });
+
+  useEffect(() => {
+    if (settings) {
+      setForm(settings);
+      if (settings.quality_tiers) {
+        try {
+          setTiers(JSON.parse(settings.quality_tiers));
+        } catch { /* ignore */ }
+      }
+    }
+  }, [settings]);
+
+  const save = useMutation({
+    mutationFn: () => api.updateSettings({ ...form, quality_tiers: JSON.stringify(tiers) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    },
+  });
+
+  const moveTier = useCallback((index: number, direction: -1 | 1) => {
+    const next = index + direction;
+    if (next < 0 || next >= tiers.length) return;
+    const updated = [...tiers];
+    [updated[index], updated[next]] = [updated[next], updated[index]];
+    setTiers(updated);
+  }, [tiers]);
+
+  const removeTier = useCallback((index: number) => {
+    setTiers(tiers.filter((_, i) => i !== index));
+  }, [tiers]);
+
+  const addTier = useCallback(() => {
+    setTiers([...tiers, { format: 'mp3', min_bitrate: 256, label: 'MP3 256kbps' }]);
+  }, [tiers]);
+
+  const clearCache = useMutation({
+    mutationFn: () => api.clearCache(),
+    onSuccess: () => toast('Cache cleared', 'success'),
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  return (
+    <div>
+      <h2 className="text-lg font-bold mb-4">Settings</h2>
+
+      {status && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <Stat label="Artists" value={status.artists_count} />
+          <Stat label="Tracks" value={status.total_tracks ?? 0} />
+          <Stat label="Pending" value={status.pending_downloads} />
+          <Stat label="Active" value={status.active_downloads} />
+        </div>
+      )}
+
+      {providers && providers.length > 0 && (
+        <SettingsSection title="Providers">
+          <div className="space-y-2 mb-4">
+            {providers.map((p) => (
+              <div key={p.name} className="flex items-center gap-3 bg-zinc-800/50 rounded-lg px-3 py-2.5">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${p.healthy ? 'bg-green-500' : 'bg-red-500'}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{p.display_name}</p>
+                  <p className="text-[11px] text-zinc-500">v{p.version} · {p.address}</p>
+                </div>
+                <span className={`text-[10px] font-medium uppercase ${p.healthy ? 'text-green-400' : 'text-red-400'}`}>
+                  {p.healthy ? 'healthy' : 'offline'}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Default Provider</label>
+            <select
+              value={form.provider_primary || ''}
+              onChange={(e) => setForm({ ...form, provider_primary: e.target.value })}
+              className="w-full bg-zinc-800 rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-zinc-600"
+            >
+              <option value="">Default (musicbrainz)</option>
+              {providers.map((p) => (
+                <option key={p.name} value={p.name}>{p.display_name}</option>
+              ))}
+            </select>
+          </div>
+        </SettingsSection>
+      )}
+
+      {settingsSections.map((section) => (
+        <SettingsSection key={section.title} title={section.title}>
+          <div className="space-y-3">
+            {section.fields.map(({ key, label, placeholder, type }) => (
+              <div key={key}>
+                <label className="block text-xs text-zinc-400 mb-1">{label}</label>
+                <input
+                  type={type || 'text'}
+                  value={form[key] || ''}
+                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  placeholder={placeholder}
+                  className="w-full bg-zinc-800 rounded-lg px-3 py-2.5 text-sm placeholder-zinc-600 outline-none focus:ring-2 focus:ring-zinc-600"
+                />
+              </div>
+            ))}
+          </div>
+        </SettingsSection>
+      ))}
+
+      <SettingsSection title="Quality Tiers">
+        <p className="text-[11px] text-zinc-500 mb-3">
+          Priority order for downloads. Higher = preferred. The upgrade scanner checks one artist per day.
+        </p>
+        <div className="space-y-1.5">
+          {tiers.map((tier, i) => (
+            <div key={i} className="flex items-center gap-2 bg-zinc-800/50 rounded-lg px-3 py-2">
+              <span className="text-[11px] text-zinc-500 w-5 text-right shrink-0 tabular-nums">{i + 1}</span>
+              <div className="flex-1 min-w-0">
+                <input
+                  value={tier.label}
+                  onChange={(e) => {
+                    const updated = [...tiers];
+                    updated[i] = { ...tier, label: e.target.value };
+                    setTiers(updated);
+                  }}
+                  className="bg-transparent text-sm w-full outline-none"
+                />
+                <div className="flex gap-2 mt-1">
+                  <select
+                    value={tier.format}
+                    onChange={(e) => {
+                      const updated = [...tiers];
+                      updated[i] = { ...tier, format: e.target.value, min_bitrate: e.target.value === 'flac' ? undefined : (tier.min_bitrate || 256) };
+                      setTiers(updated);
+                    }}
+                    className="bg-zinc-700 rounded px-2 py-0.5 text-[11px] outline-none"
+                  >
+                    <option value="flac">FLAC</option>
+                    <option value="mp3">MP3</option>
+                  </select>
+                  {tier.format === 'mp3' && (
+                    <select
+                      value={tier.min_bitrate || 256}
+                      onChange={(e) => {
+                        const updated = [...tiers];
+                        updated[i] = { ...tier, min_bitrate: Number(e.target.value) };
+                        setTiers(updated);
+                      }}
+                      className="bg-zinc-700 rounded px-2 py-0.5 text-[11px] outline-none"
+                    >
+                      <option value={320}>320 kbps+</option>
+                      <option value={256}>256 kbps+</option>
+                      <option value={192}>192 kbps+</option>
+                      <option value={128}>128 kbps+</option>
+                    </select>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col gap-0.5 shrink-0">
+                <button
+                  onClick={() => moveTier(i, -1)}
+                  disabled={i === 0}
+                  className="text-zinc-500 active:text-white disabled:opacity-20 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m18 15-6-6-6 6" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => moveTier(i, 1)}
+                  disabled={i === tiers.length - 1}
+                  className="text-zinc-500 active:text-white disabled:opacity-20 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
+              </div>
+              <button
+                onClick={() => removeTier(i)}
+                className="text-zinc-600 active:text-red-400 transition-colors shrink-0"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={addTier}
+          className="mt-2 px-3 py-1.5 bg-zinc-800 text-zinc-400 rounded-lg text-xs font-medium active:bg-zinc-700 transition-colors"
+        >
+          + Add tier
+        </button>
+      </SettingsSection>
+
+      <div className="flex gap-3 mt-6">
+        <button
+          onClick={() => save.mutate()}
+          disabled={save.isPending}
+          className="px-6 py-2.5 bg-white text-zinc-900 rounded-lg font-medium text-sm active:scale-[0.97] transition-transform disabled:opacity-50"
+        >
+          {saved ? 'Saved!' : save.isPending ? 'Saving...' : 'Save Settings'}
+        </button>
+        <button
+          onClick={() => clearCache.mutate()}
+          disabled={clearCache.isPending}
+          className="px-6 py-2.5 bg-zinc-800 text-zinc-300 rounded-lg font-medium text-sm active:bg-zinc-700 transition-colors disabled:opacity-50"
+        >
+          {clearCache.isPending ? 'Clearing...' : 'Clear Cache'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-6">
+      <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">{title}</p>
+      {children}
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="bg-zinc-800/50 rounded-lg p-4 text-center">
+      <p className="text-2xl font-bold tabular-nums">{value}</p>
+      <p className="text-xs text-zinc-500 mt-1">{label}</p>
+    </div>
+  );
+}

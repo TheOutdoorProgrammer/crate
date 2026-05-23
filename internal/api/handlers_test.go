@@ -1,0 +1,1218 @@
+package api_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"google.golang.org/grpc"
+
+	"github.com/TheOutdoorProgrammer/crate/internal/activity"
+	"github.com/TheOutdoorProgrammer/crate/internal/api"
+	"github.com/TheOutdoorProgrammer/crate/internal/cache"
+	"github.com/TheOutdoorProgrammer/crate/internal/db"
+	"github.com/TheOutdoorProgrammer/crate/internal/models"
+	"github.com/TheOutdoorProgrammer/crate/internal/provider"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/slskd"
+	pb "github.com/TheOutdoorProgrammer/crate/proto/provider"
+)
+
+type testEnv struct {
+	server      *api.Server
+	queries     *db.Queries
+	activityLog *activity.Log
+	fakeSlskd   *httptest.Server
+}
+
+func newTestEnv(t *testing.T) *testEnv {
+	t.Helper()
+
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	c, err := cache.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+
+	actLog, err := activity.NewLog(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { actLog.Close() })
+
+	grpcAddr := startFakeProvider(t)
+
+	fakeSlskd := newFakeSlskd()
+	t.Cleanup(fakeSlskd.Close)
+
+	queries := db.NewQueries(database)
+	providerMgr := provider.NewManager(c, queries)
+
+	if err := providerMgr.RegisterProvider(context.Background(), "test", grpcAddr); err != nil {
+		t.Fatalf("register provider: %v", err)
+	}
+
+	queries.SetSetting("provider_primary", "test")
+
+	slskdClient := slskd.NewClient(fakeSlskd.URL, "test-key")
+	org := &noopOrganizer{}
+	dl := downloader.NewService(queries, slskdClient, org, actLog)
+
+	srv := api.NewServer(queries, providerMgr, c, dl, actLog, nil)
+
+	return &testEnv{
+		server:      srv,
+		queries:     queries,
+		activityLog: actLog,
+		fakeSlskd:   fakeSlskd,
+	}
+}
+
+type noopOrganizer struct{}
+
+func (o *noopOrganizer) Organize(track *models.Track) error { return nil }
+
+func (e *testEnv) do(method, path string, body string) *httptest.ResponseRecorder {
+	var reader *strings.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	} else {
+		reader = strings.NewReader("")
+	}
+	req := httptest.NewRequest(method, path, reader)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	e.server.ServeHTTP(w, req)
+	return w
+}
+
+func decode[T any](t *testing.T, w *httptest.ResponseRecorder) T {
+	t.Helper()
+	var v T
+	if err := json.NewDecoder(w.Body).Decode(&v); err != nil {
+		t.Fatalf("decode response: %v\nbody: %s", err, w.Body.String())
+	}
+	return v
+}
+
+// --- Fake gRPC Provider ---
+
+type fakeProvider struct {
+	pb.UnimplementedMusicProviderServer
+}
+
+func (f *fakeProvider) Info(ctx context.Context, req *pb.InfoRequest) (*pb.InfoResponse, error) {
+	return &pb.InfoResponse{
+		Name:        "test",
+		DisplayName: "Test Provider",
+		Version:     "1.0.0",
+	}, nil
+}
+
+func (f *fakeProvider) SearchArtists(ctx context.Context, req *pb.SearchRequest) (*pb.ArtistSearchResponse, error) {
+	all := []*pb.ArtistResult{
+		{Id: "1000", Name: "Test Artist", ImageUrl: "http://img/artist.jpg", AlbumCount: 2, Rank: 5000},
+		{Id: "1001", Name: "Test Artist 2", ImageUrl: "http://img/artist2.jpg", AlbumCount: 1, Rank: 100},
+		{Id: "1002", Name: "Test Artist 3", ImageUrl: "", AlbumCount: 0, Rank: 50},
+	}
+	offset := int(req.Offset)
+	if offset >= len(all) {
+		return &pb.ArtistSearchResponse{Artists: nil, Total: int32(len(all))}, nil
+	}
+	end := offset + int(req.Limit)
+	if end > len(all) {
+		end = len(all)
+	}
+	return &pb.ArtistSearchResponse{Artists: all[offset:end], Total: int32(len(all))}, nil
+}
+
+func (f *fakeProvider) GetArtist(ctx context.Context, req *pb.EntityRequest) (*pb.ArtistDetail, error) {
+	if req.Id == "1000" {
+		return &pb.ArtistDetail{
+			Id:       "1000",
+			Name:     "Test Artist",
+			ImageUrl: "http://img/artist.jpg",
+		}, nil
+	}
+	return nil, fmt.Errorf("artist not found")
+}
+
+func (f *fakeProvider) GetArtistAlbums(ctx context.Context, req *pb.EntityRequest) (*pb.AlbumList, error) {
+	if req.Id == "1000" {
+		return &pb.AlbumList{
+			Albums: []*pb.AlbumSummary{
+				{Id: "2000", Title: "Album One", CoverUrl: "http://img/a1.jpg", Year: 2023, RecordType: "album", Rank: 2, Metadata: map[string]string{"release_date": "2023-01-15"}},
+				{Id: "2001", Title: "Album Two", CoverUrl: "http://img/a2.jpg", Year: 2024, RecordType: "album", Rank: 1, Metadata: map[string]string{"release_date": "2024-06-01"}},
+			},
+		}, nil
+	}
+	return &pb.AlbumList{}, nil
+}
+
+func (f *fakeProvider) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.AlbumDetail, error) {
+	switch req.Id {
+	case "2000":
+		return &pb.AlbumDetail{
+			Id: "2000", Title: "Album One", CoverUrl: "http://img/a1.jpg", Year: 2023, ArtistName: "Test Artist",
+			Tracks: []*pb.TrackInfo{
+				{Id: "3000", Title: "Track A1", TrackNumber: 1, DiscNumber: 1, DurationMs: 200000, Rank: 1},
+				{Id: "3001", Title: "Track A2", TrackNumber: 2, DiscNumber: 1, DurationMs: 180000, Rank: 2},
+			},
+		}, nil
+	case "2001":
+		return &pb.AlbumDetail{
+			Id: "2001", Title: "Album Two", CoverUrl: "http://img/a2.jpg", Year: 2024, ArtistName: "Test Artist",
+			Tracks: []*pb.TrackInfo{
+				{Id: "3002", Title: "Track B1", TrackNumber: 1, DiscNumber: 1, DurationMs: 240000, Rank: 1},
+			},
+		}, nil
+	}
+	return nil, fmt.Errorf("album not found")
+}
+
+func startFakeProvider(t *testing.T) string {
+	t.Helper()
+	lis, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := grpc.NewServer()
+	pb.RegisterMusicProviderServer(s, &fakeProvider{})
+	go s.Serve(lis)
+	t.Cleanup(s.Stop)
+	return lis.Addr().String()
+}
+
+// --- Fake slskd API ---
+
+func newFakeSlskd() *httptest.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v0/transfers/downloads/", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(slskd.EnqueueResponse{
+			Enqueued: []slskd.Transfer{{ID: "transfer-1", Username: "testuser", Filename: "test.flac"}},
+		})
+	})
+	mux.HandleFunc("/api/v0/transfers/downloads", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]slskd.UserDownloads{})
+	})
+	searchResp := slskd.SearchResponse{
+		ID: "search-1", IsComplete: true,
+		Responses: []slskd.SearchResult{
+			{
+				Username:          "user1",
+				HasFreeUploadSlot: true,
+				Files: []slskd.SearchFile{
+					{Filename: "Music/Test Artist - Track A1.flac", Size: 30000000, BitRate: 0},
+					{Filename: "Music/Test Artist - Track A1.mp3", Size: 8000000, BitRate: 320},
+				},
+			},
+			{
+				Username: "user2",
+				Files: []slskd.SearchFile{
+					{Filename: "Music/Test Artist - Track A1.mp3", Size: 7000000, BitRate: 256},
+				},
+			},
+		},
+	}
+	mux.HandleFunc("/api/v0/searches/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "DELETE" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		json.NewEncoder(w).Encode(searchResp)
+	})
+	mux.HandleFunc("/api/v0/searches", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(searchResp)
+	})
+	return httptest.NewServer(mux)
+}
+
+// --- Tests ---
+
+func TestSearchReturnsArtists(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/search?q=test&limit=25", "")
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decode[map[string]any](t, w)
+	artists := result["artists"].([]any)
+	if len(artists) != 3 {
+		t.Fatalf("expected 3 artists, got %d", len(artists))
+	}
+	first := artists[0].(map[string]any)
+	if first["name"] != "Test Artist" {
+		t.Errorf("expected first artist 'Test Artist', got %v", first["name"])
+	}
+	if int(result["total"].(float64)) != 3 {
+		t.Errorf("expected total 3, got %v", result["total"])
+	}
+}
+
+func TestSearchPagination(t *testing.T) {
+	env := newTestEnv(t)
+
+	w := env.do("GET", "/api/search?q=test&limit=2&offset=0", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	result := decode[map[string]any](t, w)
+	artists := result["artists"].([]any)
+	if len(artists) != 2 {
+		t.Errorf("expected 2 artists in first page, got %d", len(artists))
+	}
+	if int(result["total"].(float64)) != 3 {
+		t.Errorf("expected total 3, got %v", result["total"])
+	}
+
+	w = env.do("GET", "/api/search?q=test&limit=2&offset=2", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	result = decode[map[string]any](t, w)
+	artists = result["artists"].([]any)
+	if len(artists) != 1 {
+		t.Errorf("expected 1 artist in second page, got %d", len(artists))
+	}
+
+	w = env.do("GET", "/api/search?q=test&limit=2&offset=10", "")
+	result = decode[map[string]any](t, w)
+	artists = result["artists"].([]any)
+	if len(artists) != 0 {
+		t.Errorf("expected 0 artists past end, got %d", len(artists))
+	}
+}
+
+func TestSearchWithProviderOverride(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/search?q=test&provider=test", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decode[map[string]any](t, w)
+	artists := result["artists"].([]any)
+	if len(artists) != 3 {
+		t.Errorf("expected 3 artists, got %d", len(artists))
+	}
+}
+
+func TestSearchWithInvalidProviderFails(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/search?q=test&provider=nonexistent", "")
+	if w.Code != 500 {
+		t.Fatalf("expected 500 for unknown provider, got %d", w.Code)
+	}
+}
+
+func TestSearchRequiresQuery(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/search", "")
+	if w.Code != 400 {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestBrowseArtist(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/browse/artist/1000", "")
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decode[map[string]any](t, w)
+	if result["name"] != "Test Artist" {
+		t.Errorf("expected 'Test Artist', got %v", result["name"])
+	}
+	albums := result["albums"].([]any)
+	if len(albums) != 2 {
+		t.Errorf("expected 2 albums, got %d", len(albums))
+	}
+}
+
+func TestBrowseAlbum(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/browse/album/2000", "")
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decode[map[string]any](t, w)
+	if result["title"] != "Album One" {
+		t.Errorf("expected 'Album One', got %v", result["title"])
+	}
+	tracks := result["tracks"].([]any)
+	if len(tracks) != 2 {
+		t.Errorf("expected 2 tracks, got %d", len(tracks))
+	}
+}
+
+func TestWatchArtistCreatesFullDiscography(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	if w.Code != 201 {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	artists, _ := env.queries.ListArtists()
+	if len(artists) != 1 {
+		t.Fatalf("expected 1 artist, got %d", len(artists))
+	}
+	if artists[0].Name != "Test Artist" {
+		t.Errorf("expected 'Test Artist', got %q", artists[0].Name)
+	}
+	if artists[0].Provider != "test" {
+		t.Errorf("expected provider 'test', got %q", artists[0].Provider)
+	}
+	if artists[0].ProviderID != "1000" {
+		t.Errorf("expected provider_id '1000', got %q", artists[0].ProviderID)
+	}
+
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	if len(albums) != 2 {
+		t.Fatalf("expected 2 albums, got %d", len(albums))
+	}
+
+	tracks1, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+	tracks2, _ := env.queries.ListTracksByAlbum(albums[1].ID)
+	total := len(tracks1) + len(tracks2)
+	if total != 3 {
+		t.Errorf("expected 3 total tracks, got %d", total)
+	}
+
+	for _, t2 := range append(tracks1, tracks2...) {
+		if t2.Status != models.TrackStatusWanted {
+			t.Errorf("track %q has status %q, expected 'wanted'", t2.Title, t2.Status)
+		}
+	}
+}
+
+func TestWatchArtistWithNewReleases(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("POST", "/api/watch/artist/1000", `{"watch_new_releases": true}`)
+
+	if w.Code != 201 {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	artists, _ := env.queries.ListArtists()
+	if !artists[0].WatchNewReleases {
+		t.Error("expected watch_new_releases to be true")
+	}
+	if artists[0].WatchNewReleasesSince == nil {
+		t.Error("expected watch_new_releases_since to be set")
+	}
+}
+
+func TestWatchArtistIdempotentForFullWatch(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	w := env.do("POST", "/api/watch/artist/1000", `{}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 on re-watch, got %d", w.Code)
+	}
+
+	artists, _ := env.queries.ListArtists()
+	if len(artists) != 1 {
+		t.Errorf("expected 1 artist after re-watch, got %d", len(artists))
+	}
+}
+
+func TestWatchAllAlbumsForPartialArtist(t *testing.T) {
+	env := newTestEnv(t)
+
+	w := env.do("POST", "/api/watch/track/3000", `{
+		"artist_provider_id": "1000",
+		"artist_name": "Test Artist",
+		"artist_image_url": "http://img/artist.jpg",
+		"album_provider_id": "2000",
+		"album_title": "Album One",
+		"album_cover_url": "http://img/a1.jpg",
+		"album_year": 2023,
+		"title": "Track A1",
+		"track_number": 1,
+		"disc_number": 1,
+		"duration_ms": 200000
+	}`)
+	if w.Code != 201 {
+		t.Fatalf("watch track: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	artists, _ := env.queries.ListArtists()
+	if artists[0].Status != models.ArtistStatusPartial {
+		t.Fatalf("expected partial artist, got %q", artists[0].Status)
+	}
+
+	w = env.do("POST", "/api/watch/artist/1000", `{}`)
+	if w.Code != 200 && w.Code != 201 {
+		t.Fatalf("watch all: expected 200/201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	artists, _ = env.queries.ListArtists()
+	if len(artists) != 1 {
+		t.Fatalf("expected 1 artist, got %d", len(artists))
+	}
+
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	if len(albums) != 2 {
+		t.Errorf("expected 2 albums after watch-all, got %d", len(albums))
+	}
+}
+
+func TestWatchSingleAlbum(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("POST", "/api/watch/album/2000", `{
+		"artist_provider_id": "1000",
+		"artist_name": "Test Artist",
+		"artist_image_url": "http://img/artist.jpg"
+	}`)
+
+	if w.Code != 201 {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	artists, _ := env.queries.ListArtists()
+	if len(artists) != 1 {
+		t.Fatalf("expected 1 artist, got %d", len(artists))
+	}
+	if artists[0].Status != models.ArtistStatusPartial {
+		t.Errorf("expected partial status, got %q", artists[0].Status)
+	}
+
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	if len(albums) != 1 {
+		t.Fatalf("expected 1 album, got %d", len(albums))
+	}
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+	if len(tracks) != 2 {
+		t.Errorf("expected 2 tracks, got %d", len(tracks))
+	}
+}
+
+func TestWatchSingleTrack(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("POST", "/api/watch/track/3000", `{
+		"artist_provider_id": "1000",
+		"artist_name": "Test Artist",
+		"artist_image_url": "http://img/artist.jpg",
+		"album_provider_id": "2000",
+		"album_title": "Album One",
+		"album_cover_url": "http://img/a1.jpg",
+		"album_year": 2023,
+		"title": "Track A1",
+		"track_number": 1,
+		"disc_number": 1,
+		"duration_ms": 200000
+	}`)
+
+	if w.Code != 201 {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+	if len(tracks) != 1 {
+		t.Errorf("expected 1 track, got %d", len(tracks))
+	}
+	if tracks[0].Title != "Track A1" {
+		t.Errorf("expected 'Track A1', got %q", tracks[0].Title)
+	}
+}
+
+func TestListArtistsEmpty(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/artists", "")
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var artists []any
+	json.NewDecoder(w.Body).Decode(&artists)
+	if len(artists) != 0 {
+		t.Errorf("expected empty list, got %d", len(artists))
+	}
+}
+
+func TestGetArtistWithAlbumsAndTracks(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	w := env.do("GET", fmt.Sprintf("/api/artists/%d", artists[0].ID), "")
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	artist := decode[models.Artist](t, w)
+	if len(artist.Albums) != 2 {
+		t.Fatalf("expected 2 albums, got %d", len(artist.Albums))
+	}
+	for _, album := range artist.Albums {
+		if len(album.Tracks) == 0 {
+			t.Errorf("album %q has no tracks", album.Title)
+		}
+	}
+}
+
+func TestGetArtistNotFound(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/artists/999", "")
+	if w.Code != 404 {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestGetAlbumWithTracks(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+
+	w := env.do("GET", fmt.Sprintf("/api/albums/%d", albums[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	album := decode[models.Album](t, w)
+	if len(album.Tracks) == 0 {
+		t.Error("expected album to include tracks")
+	}
+	if album.ArtistName != "Test Artist" {
+		t.Errorf("expected artist_name 'Test Artist', got %q", album.ArtistName)
+	}
+}
+
+func TestUnwatchArtistCascades(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	w := env.do("DELETE", fmt.Sprintf("/api/artists/%d", artists[0].ID), "")
+	if w.Code != 204 {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+
+	artists, _ = env.queries.ListArtists()
+	if len(artists) != 0 {
+		t.Errorf("expected 0 artists after unwatch, got %d", len(artists))
+	}
+
+	wanted, _ := env.queries.ListWantedTracks()
+	if len(wanted) != 0 {
+		t.Errorf("expected 0 wanted tracks after cascade delete, got %d", len(wanted))
+	}
+}
+
+func TestUnwatchAlbum(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+
+	w := env.do("DELETE", fmt.Sprintf("/api/albums/%d", albums[0].ID), "")
+	if w.Code != 204 {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+
+	remaining, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	if len(remaining) != 1 {
+		t.Errorf("expected 1 album remaining, got %d", len(remaining))
+	}
+}
+
+func TestUnwatchTrack(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	w := env.do("DELETE", fmt.Sprintf("/api/tracks/%d", tracks[0].ID), "")
+	if w.Code != 204 {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+
+	remaining, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+	if len(remaining) != len(tracks)-1 {
+		t.Errorf("expected %d tracks remaining, got %d", len(tracks)-1, len(remaining))
+	}
+}
+
+func TestQueueTrackForDownload(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	w := env.do("POST", fmt.Sprintf("/api/tracks/%d/queue", tracks[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	downloads, _ := env.queries.ListDownloads("pending")
+	if len(downloads) != 1 {
+		t.Fatalf("expected 1 pending download, got %d", len(downloads))
+	}
+	if downloads[0].TrackID != tracks[0].ID {
+		t.Errorf("expected track_id %d, got %d", tracks[0].ID, downloads[0].TrackID)
+	}
+}
+
+func TestQueueTrackIsIdempotent(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	env.do("POST", fmt.Sprintf("/api/tracks/%d/queue", tracks[0].ID), "")
+	env.do("POST", fmt.Sprintf("/api/tracks/%d/queue", tracks[0].ID), "")
+
+	downloads, _ := env.queries.ListDownloads("pending")
+	if len(downloads) != 1 {
+		t.Errorf("expected 1 download after double-queue, got %d", len(downloads))
+	}
+}
+
+func TestQueueAllWantedTracks(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	w := env.do("POST", "/api/downloads/queue", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decode[map[string]int](t, w)
+	if result["queued"] != 3 {
+		t.Errorf("expected 3 queued, got %d", result["queued"])
+	}
+
+	downloads, _ := env.queries.ListDownloads("pending")
+	if len(downloads) != 3 {
+		t.Errorf("expected 3 pending downloads, got %d", len(downloads))
+	}
+}
+
+func TestListDownloadsWithTrackInfo(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+	env.do("POST", "/api/downloads/queue", "")
+
+	w := env.do("GET", "/api/downloads", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	downloads := decode[[]models.DownloadQueueItem](t, w)
+	if len(downloads) != 3 {
+		t.Fatalf("expected 3 downloads, got %d", len(downloads))
+	}
+	for _, d := range downloads {
+		if d.Track == nil {
+			t.Error("expected track info on download item")
+		}
+	}
+}
+
+func TestListDownloadsFilterByStatus(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+	env.do("POST", "/api/downloads/queue", "")
+
+	w := env.do("GET", "/api/downloads?status=complete", "")
+	downloads := decode[[]models.DownloadQueueItem](t, w)
+	if len(downloads) != 0 {
+		t.Errorf("expected 0 complete downloads, got %d", len(downloads))
+	}
+
+	w = env.do("GET", "/api/downloads?status=pending", "")
+	downloads = decode[[]models.DownloadQueueItem](t, w)
+	if len(downloads) != 3 {
+		t.Errorf("expected 3 pending downloads, got %d", len(downloads))
+	}
+}
+
+func TestRetryDownload(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+	env.do("POST", "/api/downloads/queue", "")
+
+	downloads, _ := env.queries.ListDownloads("pending")
+	errStr := "test error"
+	env.queries.UpdateDownloadStatus(downloads[0].ID, models.DownloadStatusFailed, nil, &errStr)
+
+	w := env.do("POST", fmt.Sprintf("/api/downloads/%d/retry", downloads[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	updated, _ := env.queries.ListDownloads("pending")
+	found := false
+	for _, d := range updated {
+		if d.ID == downloads[0].ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected retried download to be pending")
+	}
+}
+
+func TestDeleteDownload(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+	env.do("POST", "/api/downloads/queue", "")
+
+	downloads, _ := env.queries.ListDownloads("pending")
+	w := env.do("DELETE", fmt.Sprintf("/api/downloads/%d", downloads[0].ID), "")
+	if w.Code != 204 {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+
+	remaining, _ := env.queries.ListDownloads("")
+	if len(remaining) != len(downloads)-1 {
+		t.Errorf("expected %d downloads remaining, got %d", len(downloads)-1, len(remaining))
+	}
+}
+
+func TestToggleNewReleases(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+
+	w := env.do("PUT", fmt.Sprintf("/api/artists/%d/new-releases", artists[0].ID), `{"enabled": true}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	artist, _ := env.queries.GetArtist(artists[0].ID)
+	if !artist.WatchNewReleases {
+		t.Error("expected watch_new_releases to be true")
+	}
+	if artist.WatchNewReleasesSince == nil {
+		t.Error("expected watch_new_releases_since to be set")
+	}
+
+	env.do("PUT", fmt.Sprintf("/api/artists/%d/new-releases", artists[0].ID), `{"enabled": false}`)
+	artist, _ = env.queries.GetArtist(artists[0].ID)
+	if artist.WatchNewReleases {
+		t.Error("expected watch_new_releases to be false after disable")
+	}
+}
+
+func TestSettingsCRUD(t *testing.T) {
+	env := newTestEnv(t)
+
+	w := env.do("GET", "/api/settings", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	w = env.do("PUT", "/api/settings", `{"theme": "dark", "language": "en"}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	w = env.do("GET", "/api/settings", "")
+	settings := decode[map[string]string](t, w)
+	if settings["theme"] != "dark" {
+		t.Errorf("expected theme 'dark', got %q", settings["theme"])
+	}
+	if settings["language"] != "en" {
+		t.Errorf("expected language 'en', got %q", settings["language"])
+	}
+
+	env.do("PUT", "/api/settings", `{"theme": "light"}`)
+	w = env.do("GET", "/api/settings", "")
+	settings = decode[map[string]string](t, w)
+	if settings["theme"] != "light" {
+		t.Errorf("expected theme 'light' after update, got %q", settings["theme"])
+	}
+	if settings["language"] != "en" {
+		t.Errorf("expected language 'en' to persist, got %q", settings["language"])
+	}
+}
+
+func TestStatusEndpoint(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+	env.do("POST", "/api/downloads/queue", "")
+
+	w := env.do("GET", "/api/status", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	status := decode[map[string]any](t, w)
+	if status["status"] != "ok" {
+		t.Errorf("expected status 'ok', got %v", status["status"])
+	}
+	if int(status["artists_count"].(float64)) != 1 {
+		t.Errorf("expected 1 artist, got %v", status["artists_count"])
+	}
+	if int(status["total_tracks"].(float64)) != 3 {
+		t.Errorf("expected 3 total tracks, got %v", status["total_tracks"])
+	}
+	if int(status["pending_downloads"].(float64)) != 3 {
+		t.Errorf("expected 3 pending downloads, got %v", status["pending_downloads"])
+	}
+}
+
+func TestDownloadProgress(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/downloads/progress", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestListProviders(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/providers", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	providers := decode[[]provider.ProviderInfo](t, w)
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(providers))
+	}
+	if providers[0].Name != "test" {
+		t.Errorf("expected provider name 'test', got %q", providers[0].Name)
+	}
+}
+
+func TestClearCache(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("DELETE", "/api/cache", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestRelinkArtist(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	w := env.do("POST", fmt.Sprintf("/api/relink/artist/%d", artists[0].ID), `{"provider_id": "9999"}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	artist, _ := env.queries.GetArtist(artists[0].ID)
+	if artist.ProviderID != "9999" {
+		t.Errorf("expected provider_id '9999', got %q", artist.ProviderID)
+	}
+}
+
+func TestQueueArtistTracks(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	w := env.do("POST", fmt.Sprintf("/api/artists/%d/queue", artists[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decode[map[string]int](t, w)
+	if result["queued"] != 3 {
+		t.Errorf("expected 3 queued, got %d", result["queued"])
+	}
+
+	downloads, _ := env.queries.ListDownloads("pending")
+	if len(downloads) != 3 {
+		t.Errorf("expected 3 pending downloads, got %d", len(downloads))
+	}
+}
+
+func TestQueueAlbumTracks(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+
+	w := env.do("POST", fmt.Sprintf("/api/albums/%d/queue", albums[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decode[map[string]int](t, w)
+	trackCount := len(albums[0].Tracks)
+	if trackCount == 0 {
+		tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+		trackCount = len(tracks)
+	}
+	if result["queued"] != trackCount {
+		t.Errorf("expected %d queued, got %d", trackCount, result["queued"])
+	}
+}
+
+func TestActivityListPagination(t *testing.T) {
+	env := newTestEnv(t)
+
+	for i := 0; i < 5; i++ {
+		env.activityLog.Record("test_action", "test", int64(i), fmt.Sprintf("event %d", i))
+	}
+
+	w := env.do("GET", "/api/activity?limit=2&offset=0", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	result := decode[map[string]any](t, w)
+	items := result["items"].([]any)
+	if len(items) != 2 {
+		t.Errorf("expected 2 activity items, got %d", len(items))
+	}
+	if int(result["total"].(float64)) != 5 {
+		t.Errorf("expected total 5, got %v", result["total"])
+	}
+
+	w = env.do("GET", "/api/activity?limit=2&offset=4", "")
+	result = decode[map[string]any](t, w)
+	items = result["items"].([]any)
+	if len(items) != 1 {
+		t.Errorf("expected 1 activity item on last page, got %d", len(items))
+	}
+
+	w = env.do("GET", "/api/activity?limit=2&offset=10", "")
+	result = decode[map[string]any](t, w)
+	items = result["items"].([]any)
+	if len(items) != 0 {
+		t.Errorf("expected 0 activity items past end, got %d", len(items))
+	}
+}
+
+func TestActivityListEmpty(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/activity", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	result := decode[map[string]any](t, w)
+	items := result["items"].([]any)
+	if len(items) != 0 {
+		t.Errorf("expected 0 items, got %d", len(items))
+	}
+}
+
+func TestBrowseArtistWithProviderOverride(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/browse/artist/1000?provider=test", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	result := decode[map[string]any](t, w)
+	if result["name"] != "Test Artist" {
+		t.Errorf("expected 'Test Artist', got %v", result["name"])
+	}
+}
+
+func TestBrowseAlbumWithProviderOverride(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/browse/album/2000?provider=test", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	result := decode[map[string]any](t, w)
+	if result["title"] != "Album One" {
+		t.Errorf("expected 'Album One', got %v", result["title"])
+	}
+}
+
+func TestManualSearchTrack(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	w := env.do("POST", fmt.Sprintf("/api/tracks/%d/search", tracks[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	results := decode[[]map[string]any](t, w)
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	// Results should be sorted by score descending
+	if len(results) >= 2 {
+		score0 := results[0]["score"].(float64)
+		score1 := results[1]["score"].(float64)
+		if score0 < score1 {
+			t.Errorf("expected results sorted by score desc, got %v then %v", score0, score1)
+		}
+	}
+	// First result should have username
+	if results[0]["username"] == "" {
+		t.Error("expected username on result")
+	}
+}
+
+func TestManualDownloadTrack(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	w := env.do("POST", fmt.Sprintf("/api/tracks/%d/download", tracks[0].ID), `{
+		"username": "testuser",
+		"filename": "Music/Test Artist - Track A1.flac",
+		"size": 30000000,
+		"bit_rate": 0
+	}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decode[map[string]string](t, w)
+	if result["status"] != "downloading" {
+		t.Errorf("expected status 'downloading', got %q", result["status"])
+	}
+
+	track, _ := env.queries.GetTrackWithMeta(tracks[0].ID)
+	if track.DownloadFormat == nil || *track.DownloadFormat != "flac" {
+		t.Errorf("expected download_format 'flac', got %v", track.DownloadFormat)
+	}
+}
+
+func TestManualDownloadTrackRecordsBitrate(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	w := env.do("POST", fmt.Sprintf("/api/tracks/%d/download", tracks[0].ID), `{
+		"username": "testuser",
+		"filename": "Music/Test Artist - Track A1.mp3",
+		"size": 8000000,
+		"bit_rate": 320
+	}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	track, _ := env.queries.GetTrackWithMeta(tracks[0].ID)
+	if track.DownloadFormat == nil || *track.DownloadFormat != "mp3" {
+		t.Errorf("expected download_format 'mp3', got %v", track.DownloadFormat)
+	}
+	if track.DownloadBitrate == nil || *track.DownloadBitrate != 320 {
+		t.Errorf("expected download_bitrate 320, got %v", track.DownloadBitrate)
+	}
+}
+
+func TestUpdateTrackQuality(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	err := env.queries.UpdateTrackQuality(tracks[0].ID, "flac", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	track, _ := env.queries.GetTrackWithMeta(tracks[0].ID)
+	if track.DownloadFormat == nil || *track.DownloadFormat != "flac" {
+		t.Errorf("expected flac, got %v", track.DownloadFormat)
+	}
+
+	err = env.queries.UpdateTrackQuality(tracks[0].ID, "mp3", 320)
+	if err != nil {
+		t.Fatal(err)
+	}
+	track, _ = env.queries.GetTrackWithMeta(tracks[0].ID)
+	if track.DownloadBitrate == nil || *track.DownloadBitrate != 320 {
+		t.Errorf("expected 320, got %v", track.DownloadBitrate)
+	}
+}
+
+func TestNextArtistForUpgrade(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artist, err := env.queries.NextArtistForUpgrade(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artist.Name != "Test Artist" {
+		t.Errorf("expected 'Test Artist', got %q", artist.Name)
+	}
+
+	// Wrap around: past all artists should fail, then from 0 should work
+	_, err = env.queries.NextArtistForUpgrade(999999)
+	if err == nil {
+		t.Error("expected error for ID past all artists")
+	}
+}
+
+func TestListOwnedTracksByArtist(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	// No owned tracks initially
+	owned, err := env.queries.ListOwnedTracksByArtist(artists[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(owned) != 0 {
+		t.Errorf("expected 0 owned tracks, got %d", len(owned))
+	}
+
+	// Mark one as owned
+	env.queries.UpdateTrackFilePath(tracks[0].ID, "/music/test.flac")
+
+	owned, err = env.queries.ListOwnedTracksByArtist(artists[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(owned) != 1 {
+		t.Errorf("expected 1 owned track, got %d", len(owned))
+	}
+	if owned[0].ArtistName != "Test Artist" {
+		t.Errorf("expected artist name populated, got %q", owned[0].ArtistName)
+	}
+}

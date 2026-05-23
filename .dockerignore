@@ -1,0 +1,7 @@
+crate
+crate.db*
+web/node_modules
+web/dist
+.git
+.env
+library

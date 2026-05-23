@@ -1,0 +1,39 @@
+services:
+  crate:
+    build: .
+    ports:
+      - "6969:6969"
+    volumes:
+      - crate-data:/app/data
+      - downloads:/app/downloads
+      - ${CRATE_LIBRARY_PATH:-./library}:/app/library
+    environment:
+      - CRATE_PORT=6969
+      - CRATE_SLSKD_URL=http://slskd:5030
+      - CRATE_SLSKD_API_KEY=${CRATE_SLSKD_API_KEY}
+      - CRATE_DOWNLOADS_DIR=/app/downloads
+      - CRATE_LIBRARY_PATH=/app/library
+      - CRATE_SCAN_INTERVAL=${CRATE_SCAN_INTERVAL:-6h}
+    depends_on:
+      - slskd
+    restart: unless-stopped
+
+  slskd:
+    image: slskd/slskd:latest
+    ports:
+      - "5030:5030"
+      - "5031:5031"
+    volumes:
+      - ./config/slskd.yml:/app/slskd.yml
+      - slskd-data:/app
+      - downloads:/data
+    environment:
+      - TZ=ETC/UTC
+      - SLSKD_REMOTE_CONFIGURATION=true
+      - SLSKD_API_KEY=${CRATE_SLSKD_API_KEY}
+    restart: unless-stopped
+
+volumes:
+  crate-data:
+  slskd-data:
+  downloads:

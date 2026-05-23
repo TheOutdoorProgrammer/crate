@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@layer base {
+  html, body {
+    overflow-x: hidden;
+    background-color: #09090b;
+  }
+  html {
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+    position: fixed;
+    width: 100%;
+  }
+  #root {
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}

@@ -1,0 +1,15 @@
+soulseek:
+  address: vps.slsknet.org
+  port: 2271
+  username: your_soulseek_username
+  password: your_soulseek_password
+
+directories:
+  downloads: /data
+
+web:
+  authentication:
+    api_keys:
+      crate:
+        key: your_api_key_matching_CRATE_SLSKD_API_KEY
+        role: readwrite

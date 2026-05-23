@@ -1,0 +1,84 @@
+syntax = "proto3";
+package crate.provider.v1;
+option go_package = "github.com/TheOutdoorProgrammer/crate/proto/provider";
+
+service MusicProvider {
+  rpc Info(InfoRequest) returns (InfoResponse);
+  rpc SearchArtists(SearchRequest) returns (ArtistSearchResponse);
+  rpc GetArtist(EntityRequest) returns (ArtistDetail);
+  rpc GetArtistAlbums(EntityRequest) returns (AlbumList);
+  rpc GetAlbum(EntityRequest) returns (AlbumDetail);
+}
+
+message InfoRequest {}
+
+message InfoResponse {
+  string name = 1;
+  string display_name = 2;
+  string version = 3;
+}
+
+message SearchRequest {
+  string query = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message EntityRequest {
+  string id = 1;
+}
+
+message ArtistSearchResponse {
+  repeated ArtistResult artists = 1;
+  int32 total = 2;
+}
+
+message ArtistResult {
+  string id = 1;
+  string name = 2;
+  string image_url = 3;
+  int32 album_count = 4;
+  int32 rank = 5;
+  map<string, string> metadata = 6;
+}
+
+message ArtistDetail {
+  string id = 1;
+  string name = 2;
+  string image_url = 3;
+  map<string, string> metadata = 4;
+}
+
+message AlbumList {
+  repeated AlbumSummary albums = 1;
+}
+
+message AlbumSummary {
+  string id = 1;
+  string title = 2;
+  string cover_url = 3;
+  int32 year = 4;
+  string record_type = 5;
+  int32 rank = 6;
+  map<string, string> metadata = 7;
+}
+
+message AlbumDetail {
+  string id = 1;
+  string title = 2;
+  string cover_url = 3;
+  int32 year = 4;
+  string artist_name = 5;
+  repeated TrackInfo tracks = 6;
+  map<string, string> metadata = 7;
+}
+
+message TrackInfo {
+  string id = 1;
+  string title = 2;
+  int32 track_number = 3;
+  int32 disc_number = 4;
+  int32 duration_ms = 5;
+  int32 rank = 6;
+  map<string, string> metadata = 7;
+}
