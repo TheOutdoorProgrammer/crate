@@ -1,4 +1,4 @@
-import type { Artist, Album, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchResult } from '../types/index';
+import type { Artist, Album, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchResult, LibrarySearchResult, TrackSearchResult } from '../types/index';
 
 const BASE = '/api';
 
@@ -81,6 +81,8 @@ export const api = {
     request<void>(`/downloads/${id}/retry`, { method: 'POST' }),
   deleteDownload: (id: number) =>
     request<void>(`/downloads/${id}`, { method: 'DELETE' }),
+  clearDownloadsByStatus: (status: string) =>
+    request<{ deleted: number }>(`/downloads/clear?status=${status}`, { method: 'DELETE' }),
 
   getSettings: () => request<Record<string, string>>('/settings'),
   updateSettings: (settings: Record<string, string>) =>
@@ -100,4 +102,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ provider_id: providerID }),
     }),
+
+  searchLibrary: (q: string) =>
+    request<LibrarySearchResult[]>(`/library/search?q=${encodeURIComponent(q)}`),
+  searchBrowseArtistTracks: (id: string, q: string, provider?: string) =>
+    request<{ tracks: TrackSearchResult[] }>(`/browse/artist/${id}/tracks?q=${encodeURIComponent(q)}${provider ? `&provider=${encodeURIComponent(provider)}` : ''}`),
 };

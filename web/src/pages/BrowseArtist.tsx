@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
+import FilterBar from '../components/FilterBar';
 import MetadataPills from '../components/MetadataPills';
 
 export default function BrowseArtist() {
@@ -13,6 +14,8 @@ export default function BrowseArtist() {
   const { toast } = useToast();
   const [watchNewReleases, setWatchNewReleases] = useState(false);
   const [watchedAlbums, setWatchedAlbums] = useState<Set<string>>(new Set());
+  const [trackFilter, setTrackFilter] = useState('');
+  const [debouncedFilter, setDebouncedFilter] = useState('');
 
   const providerOverride = searchParams.get('provider') || undefined;
 
@@ -45,6 +48,29 @@ export default function BrowseArtist() {
     },
     onError: (err: Error) => toast(err.message, 'error'),
   });
+
+  const { data: trackSearchResults } = useQuery({
+    queryKey: ['browse-artist-tracks', id, debouncedFilter, providerOverride],
+    queryFn: () => api.searchBrowseArtistTracks(id!, debouncedFilter, providerOverride),
+    enabled: !!id && debouncedFilter.length >= 2,
+  });
+
+  const matchingAlbumIds = useMemo(() => {
+    if (!trackSearchResults?.tracks || !debouncedFilter) return null;
+    const ids = new Set<string>();
+    for (const t of trackSearchResults.tracks) ids.add(t.album_id);
+    return ids;
+  }, [trackSearchResults, debouncedFilter]);
+
+  const filteredAlbums = useMemo(() => {
+    if (!artist?.albums) return [];
+    if (!debouncedFilter) return artist.albums;
+    const q = debouncedFilter.toLowerCase();
+    return artist.albums.filter((album) => {
+      if (album.title.toLowerCase().includes(q)) return true;
+      return matchingAlbumIds?.has(album.id) ?? false;
+    });
+  }, [artist?.albums, debouncedFilter, matchingAlbumIds]);
 
   if (isLoading) {
     return (
@@ -123,8 +149,20 @@ export default function BrowseArtist() {
       {artist.albums && artist.albums.length > 0 && (
         <div>
           <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Discography</p>
+          <FilterBar
+            value={trackFilter}
+            onChange={(v) => {
+              setTrackFilter(v);
+              setDebouncedFilter(v);
+            }}
+            debounceMs={400}
+            placeholder="Filter by song or album title..."
+          />
+          {debouncedFilter && filteredAlbums.length === 0 && (
+            <p className="text-zinc-500 text-sm text-center py-4">No matching albums or tracks</p>
+          )}
           <div className="space-y-1">
-            {artist.albums.map((album) => {
+            {filteredAlbums.map((album) => {
               const isWatched = watchedAlbums.has(album.id);
               return (
                 <div
@@ -137,7 +175,7 @@ export default function BrowseArtist() {
                   >
                     <div className="w-10 h-10 rounded bg-zinc-700 overflow-hidden shrink-0">
                       {album.cover_url ? (
-                        <img src={album.cover_url} alt="" className="w-full h-full object-cover" />
+                        <img src={album.cover_url} alt="" className="w-full h-full object-cover" onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-zinc-500">
                           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="1" /></svg>

@@ -56,7 +56,7 @@ export default function AlphabetRail({ activeLetters }: AlphabetRailProps) {
     <>
       <div
         ref={railRef}
-        className="fixed right-1 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center select-none touch-none md:right-[calc(50%-20rem-0.25rem)]"
+        className="fixed right-1 top-1/2 -translate-y-1/2 z-40 flex flex-col items-center select-none touch-none md:right-[max(0.25rem,calc(50vw-39rem))]"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -25,6 +26,7 @@ type Server struct {
 	activityLog *activity.Log
 	router      chi.Router
 	frontendFS  fs.FS
+	bgWork      sync.WaitGroup
 }
 
 func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS) *Server {
@@ -42,6 +44,10 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
+}
+
+func (s *Server) WaitBackground() {
+	s.bgWork.Wait()
 }
 
 func (s *Server) setupRouter() chi.Router {
@@ -64,9 +70,11 @@ func (s *Server) setupRouter() chi.Router {
 		r.Get("/status", s.handleStatus)
 
 		r.Get("/search", s.handleSearch)
+		r.Get("/library/search", s.handleLibrarySearch)
 
 		r.Route("/browse", func(r chi.Router) {
 			r.Get("/artist/{id}", s.handleBrowseArtist)
+			r.Get("/artist/{id}/tracks", s.handleBrowseArtistTrackSearch)
 			r.Get("/album/{id}", s.handleBrowseAlbum)
 		})
 
@@ -101,6 +109,7 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/", s.handleListDownloads)
 			r.Get("/progress", s.handleDownloadProgress)
 			r.Post("/queue", s.handleQueueDownloads)
+			r.Delete("/clear", s.handleClearDownloadsByStatus)
 			r.Post("/{id}/retry", s.handleRetryDownload)
 			r.Delete("/{id}", s.handleDeleteDownload)
 		})

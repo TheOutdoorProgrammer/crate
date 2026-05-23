@@ -8,6 +8,7 @@ service MusicProvider {
   rpc GetArtist(EntityRequest) returns (ArtistDetail);
   rpc GetArtistAlbums(EntityRequest) returns (AlbumList);
   rpc GetAlbum(EntityRequest) returns (AlbumDetail);
+  rpc SearchArtistTracks(ArtistTrackSearchRequest) returns (ArtistTrackSearchResponse);
 }
 
 message InfoRequest {}
@@ -81,4 +82,24 @@ message TrackInfo {
   int32 duration_ms = 5;
   int32 rank = 6;
   map<string, string> metadata = 7;
+}
+
+message ArtistTrackSearchRequest {
+  string artist_id = 1;
+  string query = 2;
+  int32 limit = 3;
+}
+
+message ArtistTrackSearchResponse {
+  repeated TrackSearchResult tracks = 1;
+}
+
+message TrackSearchResult {
+  string id = 1;
+  string title = 2;
+  int32 duration_ms = 3;
+  string album_id = 4;
+  string album_title = 5;
+  string album_cover_url = 6;
+  int32 album_year = 7;
 }

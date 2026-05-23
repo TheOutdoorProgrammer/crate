@@ -277,6 +277,40 @@ func (m *Manager) GetAlbum(ctx context.Context, providerName, id string) (*pb.Al
 	return result, nil
 }
 
+func (m *Manager) SearchArtistTracks(ctx context.Context, providerName, artistID, query string, limit int32) (*pb.ArtistTrackSearchResponse, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	cacheKey := fmt.Sprintf("%s:artist-tracks:%s:%s:%d", providerName, artistID, query, limit)
+
+	if data, ok := m.cache.Get(cacheKey); ok {
+		var result pb.ArtistTrackSearchResponse
+		if json.Unmarshal(data, &result) == nil {
+			return &result, nil
+		}
+	}
+
+	client, err := m.getClient(providerName)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := client.SearchArtistTracks(ctx, &pb.ArtistTrackSearchRequest{
+		ArtistId: artistID,
+		Query:    query,
+		Limit:    limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search artist tracks from %s: %w", providerName, err)
+	}
+
+	if data, err := json.Marshal(result); err == nil {
+		m.cache.Set(cacheKey, data, m.CacheTTL())
+	}
+
+	return result, nil
+}
+
 func (m *Manager) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

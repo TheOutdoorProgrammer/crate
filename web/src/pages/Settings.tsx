@@ -15,6 +15,7 @@ const settingsSections = [
     fields: [
       { key: 'slskd_url', label: 'URL', placeholder: 'http://localhost:5030' },
       { key: 'slskd_api_key', label: 'API Key', placeholder: 'Your slskd API key', type: 'password' },
+      { key: 'max_concurrent_slskd', label: 'Max Concurrent Downloads', placeholder: '10' },
     ],
   },
   {
@@ -37,6 +38,8 @@ const settingsSections = [
     title: 'Scheduling',
     fields: [
       { key: 'scan_interval', label: 'Scan Interval', placeholder: '6h' },
+      { key: 'max_auto_queue', label: 'Max Auto-Queue Per Cycle', placeholder: '50' },
+      { key: 'requeue_cooldown_days', label: 'Re-queue Cooldown (days)', placeholder: '7' },
       { key: 'cache_ttl_hours', label: 'Cache TTL (hours)', placeholder: '24' },
       { key: 'activity_retention_days', label: 'Activity Retention (days)', placeholder: '30' },
     ],

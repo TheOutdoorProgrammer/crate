@@ -172,3 +172,22 @@ export interface ProviderInfo {
   address: string;
   healthy: boolean;
 }
+
+export interface LibrarySearchResult {
+  artist_id: number;
+  artist_name: string;
+  album_id: number;
+  album_title: string;
+  track_id: number;
+  track_title: string;
+}
+
+export interface TrackSearchResult {
+  id: string;
+  title: string;
+  duration_ms: number;
+  album_id: string;
+  album_title: string;
+  album_cover_url: string;
+  album_year: number;
+}

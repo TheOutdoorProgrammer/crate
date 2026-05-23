@@ -13,13 +13,25 @@ export default function Downloads() {
   const { data: downloads, isLoading } = useQuery({
     queryKey: ['downloads'],
     queryFn: () => api.listDownloads(),
-    refetchInterval: 5000,
+    refetchInterval: (query) => {
+      const dl = query.state.data;
+      if (!dl) return 5000;
+      const hasActive = dl.some((d: any) =>
+        d.status === 'pending' || d.status === 'searching' || d.status === 'downloading' || d.status === 'organizing'
+      );
+      return hasActive ? 5000 : false;
+    },
   });
+
+  const hasActiveDownloads = downloads?.some(
+    (d) => d.status === 'downloading' || d.status === 'searching' || d.status === 'pending' || d.status === 'organizing'
+  ) ?? false;
 
   const { data: progress } = useQuery({
     queryKey: ['download-progress'],
     queryFn: api.getDownloadProgress,
-    refetchInterval: 2000,
+    refetchInterval: hasActiveDownloads ? 2000 : false,
+    enabled: hasActiveDownloads,
   });
 
   const [extraActivity, setExtraActivity] = useState<ActivityLog[]>([]);
@@ -60,6 +72,11 @@ export default function Downloads() {
 
   const dismiss = useMutation({
     mutationFn: (id: number) => api.deleteDownload(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
+  });
+
+  const clearByStatus = useMutation({
+    mutationFn: (status: string) => api.clearDownloadsByStatus(status),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
   });
 
@@ -155,12 +172,12 @@ export default function Downloads() {
             </Section>
           )}
           {failed.length > 0 && (
-            <Section title="Failed">
+            <Section title="Failed" onClear={() => clearByStatus.mutate('failed')} clearLabel="Clear All">
               {failed.map((dl) => <DownloadRow key={dl.id} dl={dl} onRetry={retry.mutate} onDismiss={dismiss.mutate} />)}
             </Section>
           )}
           {complete.length > 0 && (
-            <Section title="Complete">
+            <Section title="Complete" onClear={() => clearByStatus.mutate('complete')} clearLabel="Clear All">
               {complete.map((dl) => <DownloadRow key={dl.id} dl={dl} onRetry={retry.mutate} onDismiss={dismiss.mutate} />)}
             </Section>
           )}
@@ -232,10 +249,20 @@ function ActivityList({ activity, total, offset, loadingMore, onLoadMore }: {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, onClear, clearLabel }: { title: string; children: React.ReactNode; onClear?: () => void; clearLabel?: string }) {
   return (
     <div className="mb-4">
-      <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">{title}</p>
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">{title}</p>
+        {onClear && (
+          <button
+            onClick={onClear}
+            className="text-[11px] text-zinc-500 active:text-red-400 transition-colors"
+          >
+            {clearLabel || 'Clear'}
+          </button>
+        )}
+      </div>
       <div className="space-y-1">{children}</div>
     </div>
   );

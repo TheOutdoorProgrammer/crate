@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/TheOutdoorProgrammer/crate/internal/db"
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
@@ -96,6 +98,42 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	results, err := s.queries.SearchLibrary(query, 50)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "library search failed")
+		return
+	}
+	if results == nil {
+		results = []db.LibrarySearchResult{}
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
+func (s *Server) handleBrowseArtistTrackSearch(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"tracks": []any{}})
+		return
+	}
+	providerName := r.URL.Query().Get("provider")
+	if providerName == "" {
+		providerName = s.providers.Primary()
+	}
+	result, err := s.providers.SearchArtistTracks(r.Context(), providerName, id, query, 50)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "track search failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -192,12 +230,12 @@ func (s *Server) handleWatchArtist(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		for _, pa := range albumList.Albums {
-			if existingAlbum, _ := s.queries.FindAlbumByProvider(primary, pa.Id); existingAlbum != nil {
-				continue
-			}
-			s.saveAlbumFromProvider(r, primary, existing.ID, pa)
-		}
+		albums := albumList.Albums
+		s.bgWork.Add(1)
+		go func() {
+			defer s.bgWork.Done()
+			s.saveAlbumsFromProvider(primary, existing.ID, albums)
+		}()
 
 		writeJSON(w, http.StatusOK, existing)
 		return
@@ -221,14 +259,27 @@ func (s *Server) handleWatchArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, pa := range albumList.Albums {
-		s.saveAlbumFromProvider(r, primary, artist.ID, pa)
-	}
+	albums := albumList.Albums
+	s.bgWork.Add(1)
+	go func() {
+		defer s.bgWork.Done()
+		s.saveAlbumsFromProvider(primary, artist.ID, albums)
+	}()
 
 	writeJSON(w, http.StatusCreated, artist)
 }
 
-func (s *Server) saveAlbumFromProvider(r *http.Request, providerName string, artistID int64, pa *pb.AlbumSummary) {
+func (s *Server) saveAlbumsFromProvider(providerName string, artistID int64, albums []*pb.AlbumSummary) {
+	ctx := context.Background()
+	for _, pa := range albums {
+		if existingAlbum, _ := s.queries.FindAlbumByProvider(providerName, pa.Id); existingAlbum != nil {
+			continue
+		}
+		s.saveAlbumFromProvider(ctx, providerName, artistID, pa)
+	}
+}
+
+func (s *Server) saveAlbumFromProvider(ctx context.Context, providerName string, artistID int64, pa *pb.AlbumSummary) {
 	year := intPtrOrNil(int(pa.Year))
 	cover := pa.CoverUrl
 	album := &models.Album{
@@ -245,7 +296,7 @@ func (s *Server) saveAlbumFromProvider(r *http.Request, providerName string, art
 		return
 	}
 
-	albumDetail, err := s.providers.GetAlbum(r.Context(), providerName, pa.Id)
+	albumDetail, err := s.providers.GetAlbum(ctx, providerName, pa.Id)
 	if err != nil {
 		return
 	}
@@ -571,11 +622,14 @@ func (s *Server) handleQueueArtistTracks(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to list wanted tracks")
 		return
 	}
-	queued := 0
-	for _, t := range tracks {
-		if err := s.queries.EnqueueDownload(t.ID); err == nil {
-			queued++
-		}
+	ids := make([]int64, len(tracks))
+	for i, t := range tracks {
+		ids[i] = t.ID
+	}
+	queued, err := s.queries.EnqueueDownloadBatch(ids)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to queue tracks")
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"queued": queued})
 }
@@ -591,11 +645,14 @@ func (s *Server) handleQueueAlbumTracks(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to list wanted tracks")
 		return
 	}
-	queued := 0
-	for _, t := range tracks {
-		if err := s.queries.EnqueueDownload(t.ID); err == nil {
-			queued++
-		}
+	ids := make([]int64, len(tracks))
+	for i, t := range tracks {
+		ids[i] = t.ID
+	}
+	queued, err := s.queries.EnqueueDownloadBatch(ids)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to queue tracks")
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"queued": queued})
 }
@@ -683,11 +740,14 @@ func (s *Server) handleQueueDownloads(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list wanted tracks")
 		return
 	}
-	queued := 0
-	for _, t := range tracks {
-		if err := s.queries.EnqueueDownload(t.ID); err == nil {
-			queued++
-		}
+	ids := make([]int64, len(tracks))
+	for i, t := range tracks {
+		ids[i] = t.ID
+	}
+	queued, err := s.queries.EnqueueDownloadBatch(ids)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to queue tracks")
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"queued": queued})
 }
@@ -703,6 +763,25 @@ func (s *Server) handleDeleteDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleClearDownloadsByStatus(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		writeError(w, http.StatusBadRequest, "status parameter required")
+		return
+	}
+	allowed := map[string]bool{"failed": true, "complete": true}
+	if !allowed[status] {
+		writeError(w, http.StatusBadRequest, "can only clear failed or complete downloads")
+		return
+	}
+	deleted, err := s.queries.DeleteDownloadsByStatus(status)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear downloads")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"deleted": deleted})
 }
 
 func (s *Server) handleRetryDownload(w http.ResponseWriter, r *http.Request) {

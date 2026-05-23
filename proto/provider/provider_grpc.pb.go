@@ -19,11 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MusicProvider_Info_FullMethodName            = "/crate.provider.v1.MusicProvider/Info"
-	MusicProvider_SearchArtists_FullMethodName   = "/crate.provider.v1.MusicProvider/SearchArtists"
-	MusicProvider_GetArtist_FullMethodName       = "/crate.provider.v1.MusicProvider/GetArtist"
-	MusicProvider_GetArtistAlbums_FullMethodName = "/crate.provider.v1.MusicProvider/GetArtistAlbums"
-	MusicProvider_GetAlbum_FullMethodName        = "/crate.provider.v1.MusicProvider/GetAlbum"
+	MusicProvider_Info_FullMethodName               = "/crate.provider.v1.MusicProvider/Info"
+	MusicProvider_SearchArtists_FullMethodName      = "/crate.provider.v1.MusicProvider/SearchArtists"
+	MusicProvider_GetArtist_FullMethodName          = "/crate.provider.v1.MusicProvider/GetArtist"
+	MusicProvider_GetArtistAlbums_FullMethodName    = "/crate.provider.v1.MusicProvider/GetArtistAlbums"
+	MusicProvider_GetAlbum_FullMethodName           = "/crate.provider.v1.MusicProvider/GetAlbum"
+	MusicProvider_SearchArtistTracks_FullMethodName = "/crate.provider.v1.MusicProvider/SearchArtistTracks"
 )
 
 // MusicProviderClient is the client API for MusicProvider service.
@@ -35,6 +36,7 @@ type MusicProviderClient interface {
 	GetArtist(ctx context.Context, in *EntityRequest, opts ...grpc.CallOption) (*ArtistDetail, error)
 	GetArtistAlbums(ctx context.Context, in *EntityRequest, opts ...grpc.CallOption) (*AlbumList, error)
 	GetAlbum(ctx context.Context, in *EntityRequest, opts ...grpc.CallOption) (*AlbumDetail, error)
+	SearchArtistTracks(ctx context.Context, in *ArtistTrackSearchRequest, opts ...grpc.CallOption) (*ArtistTrackSearchResponse, error)
 }
 
 type musicProviderClient struct {
@@ -95,6 +97,16 @@ func (c *musicProviderClient) GetAlbum(ctx context.Context, in *EntityRequest, o
 	return out, nil
 }
 
+func (c *musicProviderClient) SearchArtistTracks(ctx context.Context, in *ArtistTrackSearchRequest, opts ...grpc.CallOption) (*ArtistTrackSearchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ArtistTrackSearchResponse)
+	err := c.cc.Invoke(ctx, MusicProvider_SearchArtistTracks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MusicProviderServer is the server API for MusicProvider service.
 // All implementations must embed UnimplementedMusicProviderServer
 // for forward compatibility.
@@ -104,6 +116,7 @@ type MusicProviderServer interface {
 	GetArtist(context.Context, *EntityRequest) (*ArtistDetail, error)
 	GetArtistAlbums(context.Context, *EntityRequest) (*AlbumList, error)
 	GetAlbum(context.Context, *EntityRequest) (*AlbumDetail, error)
+	SearchArtistTracks(context.Context, *ArtistTrackSearchRequest) (*ArtistTrackSearchResponse, error)
 	mustEmbedUnimplementedMusicProviderServer()
 }
 
@@ -128,6 +141,9 @@ func (UnimplementedMusicProviderServer) GetArtistAlbums(context.Context, *Entity
 }
 func (UnimplementedMusicProviderServer) GetAlbum(context.Context, *EntityRequest) (*AlbumDetail, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAlbum not implemented")
+}
+func (UnimplementedMusicProviderServer) SearchArtistTracks(context.Context, *ArtistTrackSearchRequest) (*ArtistTrackSearchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchArtistTracks not implemented")
 }
 func (UnimplementedMusicProviderServer) mustEmbedUnimplementedMusicProviderServer() {}
 func (UnimplementedMusicProviderServer) testEmbeddedByValue()                       {}
@@ -240,6 +256,24 @@ func _MusicProvider_GetAlbum_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MusicProvider_SearchArtistTracks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ArtistTrackSearchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MusicProviderServer).SearchArtistTracks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MusicProvider_SearchArtistTracks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MusicProviderServer).SearchArtistTracks(ctx, req.(*ArtistTrackSearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MusicProvider_ServiceDesc is the grpc.ServiceDesc for MusicProvider service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -266,6 +300,10 @@ var MusicProvider_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAlbum",
 			Handler:    _MusicProvider_GetAlbum_Handler,
+		},
+		{
+			MethodName: "SearchArtistTracks",
+			Handler:    _MusicProvider_SearchArtistTracks_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

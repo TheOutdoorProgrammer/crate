@@ -1,19 +1,71 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import AlphabetRail from '../components/AlphabetRail';
+import FilterBar from '../components/FilterBar';
 import ProgressBar from '../components/ProgressBar';
 import type { Artist } from '../types/index';
 
 export default function Library() {
+  const [filter, setFilter] = useState('');
+  const [debouncedFilter, setDebouncedFilter] = useState('');
+
   const { data: artists, isLoading } = useQuery({
     queryKey: ['artists'],
     queryFn: api.listArtists,
   });
 
-  const grouped = useMemo(() => groupByLetter(artists ?? []), [artists]);
+  const { data: searchResults } = useQuery({
+    queryKey: ['library-search', debouncedFilter],
+    queryFn: () => api.searchLibrary(debouncedFilter),
+    enabled: debouncedFilter.length >= 2,
+  });
+
+  const matchedArtistIds = useMemo(() => {
+    if (!debouncedFilter || !searchResults) return null;
+    const ids = new Set<number>();
+    for (const r of searchResults) ids.add(r.artist_id);
+    return ids;
+  }, [debouncedFilter, searchResults]);
+
+  const filteredArtists = useMemo(() => {
+    if (!artists) return [];
+    if (!debouncedFilter) return artists;
+    const q = debouncedFilter.toLowerCase();
+    return artists.filter((a) => {
+      if (a.name.toLowerCase().includes(q)) return true;
+      return matchedArtistIds?.has(a.id) ?? false;
+    });
+  }, [artists, debouncedFilter, matchedArtistIds]);
+
+  const matchCountByArtist = useMemo(() => {
+    if (!searchResults || !debouncedFilter) return null;
+    const counts = new Map<number, number>();
+    for (const r of searchResults) {
+      counts.set(r.artist_id, (counts.get(r.artist_id) || 0) + 1);
+    }
+    return counts;
+  }, [searchResults, debouncedFilter]);
+
+  const grouped = useMemo(() => groupByLetter(filteredArtists), [filteredArtists]);
   const activeLetters = useMemo(() => new Set(grouped.map((g) => g.letter)), [grouped]);
+  const scrollRestored = useRef(false);
+
+  useEffect(() => {
+    if (!artists?.length || scrollRestored.current) return;
+    const saved = sessionStorage.getItem('library-scroll');
+    if (saved) {
+      requestAnimationFrame(() => window.scrollTo(0, parseInt(saved, 10)));
+    }
+    scrollRestored.current = true;
+  }, [artists]);
+
+  useEffect(() => {
+    const onScroll = () => sessionStorage.setItem('library-scroll', String(window.scrollY));
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   if (isLoading) {
     return (
@@ -56,9 +108,22 @@ export default function Library() {
     <div className="relative">
       <h2 className="text-lg font-bold mb-3">Watchlist</h2>
 
+      <FilterBar
+        value={filter}
+        onChange={(v) => {
+          setFilter(v);
+          setDebouncedFilter(v);
+        }}
+        debounceMs={300}
+        placeholder="Filter by artist or song title..."
+      />
+
       <AlphabetRail activeLetters={activeLetters} />
 
       <div className="pr-5">
+        {debouncedFilter && filteredArtists.length === 0 && (
+          <p className="text-zinc-500 text-sm text-center py-6">No matches</p>
+        )}
         {grouped.map(({ letter, artists: group }) => (
           <div key={letter} id={`section-${letter}`}>
             {grouped.length > 1 && (
@@ -68,7 +133,12 @@ export default function Library() {
             )}
             <div className="space-y-1">
               {group.map((artist) => (
-                <ArtistRow key={artist.id} artist={artist} />
+                <ArtistRow
+                  key={artist.id}
+                  artist={artist}
+                  matchCount={matchCountByArtist?.get(artist.id)}
+                  isTrackMatch={!!matchedArtistIds?.has(artist.id) && !artist.name.toLowerCase().includes(debouncedFilter.toLowerCase())}
+                />
               ))}
             </div>
           </div>
@@ -78,7 +148,7 @@ export default function Library() {
   );
 }
 
-function ArtistRow({ artist }: { artist: Artist }) {
+function ArtistRow({ artist, matchCount, isTrackMatch }: { artist: Artist; matchCount?: number; isTrackMatch?: boolean }) {
   return (
     <Link
       to={`/artist/${artist.id}`}
@@ -95,9 +165,13 @@ function ArtistRow({ artist }: { artist: Artist }) {
       </div>
       <div className="flex-1 min-w-0">
         <p className="font-medium text-sm truncate">{artist.name}</p>
-        <div className="mt-0.5">
-          <ProgressBar owned={artist.owned_tracks ?? 0} total={artist.total_tracks ?? 0} />
-        </div>
+        {isTrackMatch && matchCount ? (
+          <p className="text-[11px] text-zinc-500 mt-0.5">{matchCount} matching track{matchCount > 1 ? 's' : ''}</p>
+        ) : (
+          <div className="mt-0.5">
+            <ProgressBar owned={artist.owned_tracks ?? 0} total={artist.total_tracks ?? 0} />
+          </div>
+        )}
       </div>
       {artist.orphaned && (
         <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase shrink-0 bg-red-900/50 text-red-400">

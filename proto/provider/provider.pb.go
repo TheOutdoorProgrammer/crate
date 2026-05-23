@@ -745,6 +745,202 @@ func (x *TrackInfo) GetMetadata() map[string]string {
 	return nil
 }
 
+type ArtistTrackSearchRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ArtistId      string                 `protobuf:"bytes,1,opt,name=artist_id,json=artistId,proto3" json:"artist_id,omitempty"`
+	Query         string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtistTrackSearchRequest) Reset() {
+	*x = ArtistTrackSearchRequest{}
+	mi := &file_proto_provider_provider_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtistTrackSearchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtistTrackSearchRequest) ProtoMessage() {}
+
+func (x *ArtistTrackSearchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_provider_provider_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtistTrackSearchRequest.ProtoReflect.Descriptor instead.
+func (*ArtistTrackSearchRequest) Descriptor() ([]byte, []int) {
+	return file_proto_provider_provider_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ArtistTrackSearchRequest) GetArtistId() string {
+	if x != nil {
+		return x.ArtistId
+	}
+	return ""
+}
+
+func (x *ArtistTrackSearchRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *ArtistTrackSearchRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ArtistTrackSearchResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tracks        []*TrackSearchResult   `protobuf:"bytes,1,rep,name=tracks,proto3" json:"tracks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtistTrackSearchResponse) Reset() {
+	*x = ArtistTrackSearchResponse{}
+	mi := &file_proto_provider_provider_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtistTrackSearchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtistTrackSearchResponse) ProtoMessage() {}
+
+func (x *ArtistTrackSearchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_provider_provider_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtistTrackSearchResponse.ProtoReflect.Descriptor instead.
+func (*ArtistTrackSearchResponse) Descriptor() ([]byte, []int) {
+	return file_proto_provider_provider_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ArtistTrackSearchResponse) GetTracks() []*TrackSearchResult {
+	if x != nil {
+		return x.Tracks
+	}
+	return nil
+}
+
+type TrackSearchResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	DurationMs    int32                  `protobuf:"varint,3,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	AlbumId       string                 `protobuf:"bytes,4,opt,name=album_id,json=albumId,proto3" json:"album_id,omitempty"`
+	AlbumTitle    string                 `protobuf:"bytes,5,opt,name=album_title,json=albumTitle,proto3" json:"album_title,omitempty"`
+	AlbumCoverUrl string                 `protobuf:"bytes,6,opt,name=album_cover_url,json=albumCoverUrl,proto3" json:"album_cover_url,omitempty"`
+	AlbumYear     int32                  `protobuf:"varint,7,opt,name=album_year,json=albumYear,proto3" json:"album_year,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TrackSearchResult) Reset() {
+	*x = TrackSearchResult{}
+	mi := &file_proto_provider_provider_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrackSearchResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrackSearchResult) ProtoMessage() {}
+
+func (x *TrackSearchResult) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_provider_provider_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrackSearchResult.ProtoReflect.Descriptor instead.
+func (*TrackSearchResult) Descriptor() ([]byte, []int) {
+	return file_proto_provider_provider_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *TrackSearchResult) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *TrackSearchResult) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *TrackSearchResult) GetDurationMs() int32 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+func (x *TrackSearchResult) GetAlbumId() string {
+	if x != nil {
+		return x.AlbumId
+	}
+	return ""
+}
+
+func (x *TrackSearchResult) GetAlbumTitle() string {
+	if x != nil {
+		return x.AlbumTitle
+	}
+	return ""
+}
+
+func (x *TrackSearchResult) GetAlbumCoverUrl() string {
+	if x != nil {
+		return x.AlbumCoverUrl
+	}
+	return ""
+}
+
+func (x *TrackSearchResult) GetAlbumYear() int32 {
+	if x != nil {
+		return x.AlbumYear
+	}
+	return 0
+}
+
 var File_proto_provider_provider_proto protoreflect.FileDescriptor
 
 const file_proto_provider_provider_proto_rawDesc = "" +
@@ -821,13 +1017,31 @@ const file_proto_provider_provider_proto_rawDesc = "" +
 	"\bmetadata\x18\a \x03(\v2*.crate.provider.v1.TrackInfo.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\xa5\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"c\n" +
+	"\x18ArtistTrackSearchRequest\x12\x1b\n" +
+	"\tartist_id\x18\x01 \x01(\tR\bartistId\x12\x14\n" +
+	"\x05query\x18\x02 \x01(\tR\x05query\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\"Y\n" +
+	"\x19ArtistTrackSearchResponse\x12<\n" +
+	"\x06tracks\x18\x01 \x03(\v2$.crate.provider.v1.TrackSearchResultR\x06tracks\"\xdd\x01\n" +
+	"\x11TrackSearchResult\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x1f\n" +
+	"\vduration_ms\x18\x03 \x01(\x05R\n" +
+	"durationMs\x12\x19\n" +
+	"\balbum_id\x18\x04 \x01(\tR\aalbumId\x12\x1f\n" +
+	"\valbum_title\x18\x05 \x01(\tR\n" +
+	"albumTitle\x12&\n" +
+	"\x0falbum_cover_url\x18\x06 \x01(\tR\ralbumCoverUrl\x12\x1d\n" +
+	"\n" +
+	"album_year\x18\a \x01(\x05R\talbumYear2\x96\x04\n" +
 	"\rMusicProvider\x12G\n" +
 	"\x04Info\x12\x1e.crate.provider.v1.InfoRequest\x1a\x1f.crate.provider.v1.InfoResponse\x12Z\n" +
 	"\rSearchArtists\x12 .crate.provider.v1.SearchRequest\x1a'.crate.provider.v1.ArtistSearchResponse\x12N\n" +
 	"\tGetArtist\x12 .crate.provider.v1.EntityRequest\x1a\x1f.crate.provider.v1.ArtistDetail\x12Q\n" +
 	"\x0fGetArtistAlbums\x12 .crate.provider.v1.EntityRequest\x1a\x1c.crate.provider.v1.AlbumList\x12L\n" +
-	"\bGetAlbum\x12 .crate.provider.v1.EntityRequest\x1a\x1e.crate.provider.v1.AlbumDetailB6Z4github.com/TheOutdoorProgrammer/crate/proto/providerb\x06proto3"
+	"\bGetAlbum\x12 .crate.provider.v1.EntityRequest\x1a\x1e.crate.provider.v1.AlbumDetail\x12o\n" +
+	"\x12SearchArtistTracks\x12+.crate.provider.v1.ArtistTrackSearchRequest\x1a,.crate.provider.v1.ArtistTrackSearchResponseB6Z4github.com/TheOutdoorProgrammer/crate/proto/providerb\x06proto3"
 
 var (
 	file_proto_provider_provider_proto_rawDescOnce sync.Once
@@ -841,49 +1055,55 @@ func file_proto_provider_provider_proto_rawDescGZIP() []byte {
 	return file_proto_provider_provider_proto_rawDescData
 }
 
-var file_proto_provider_provider_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_proto_provider_provider_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_proto_provider_provider_proto_goTypes = []any{
-	(*InfoRequest)(nil),          // 0: crate.provider.v1.InfoRequest
-	(*InfoResponse)(nil),         // 1: crate.provider.v1.InfoResponse
-	(*SearchRequest)(nil),        // 2: crate.provider.v1.SearchRequest
-	(*EntityRequest)(nil),        // 3: crate.provider.v1.EntityRequest
-	(*ArtistSearchResponse)(nil), // 4: crate.provider.v1.ArtistSearchResponse
-	(*ArtistResult)(nil),         // 5: crate.provider.v1.ArtistResult
-	(*ArtistDetail)(nil),         // 6: crate.provider.v1.ArtistDetail
-	(*AlbumList)(nil),            // 7: crate.provider.v1.AlbumList
-	(*AlbumSummary)(nil),         // 8: crate.provider.v1.AlbumSummary
-	(*AlbumDetail)(nil),          // 9: crate.provider.v1.AlbumDetail
-	(*TrackInfo)(nil),            // 10: crate.provider.v1.TrackInfo
-	nil,                          // 11: crate.provider.v1.ArtistResult.MetadataEntry
-	nil,                          // 12: crate.provider.v1.ArtistDetail.MetadataEntry
-	nil,                          // 13: crate.provider.v1.AlbumSummary.MetadataEntry
-	nil,                          // 14: crate.provider.v1.AlbumDetail.MetadataEntry
-	nil,                          // 15: crate.provider.v1.TrackInfo.MetadataEntry
+	(*InfoRequest)(nil),               // 0: crate.provider.v1.InfoRequest
+	(*InfoResponse)(nil),              // 1: crate.provider.v1.InfoResponse
+	(*SearchRequest)(nil),             // 2: crate.provider.v1.SearchRequest
+	(*EntityRequest)(nil),             // 3: crate.provider.v1.EntityRequest
+	(*ArtistSearchResponse)(nil),      // 4: crate.provider.v1.ArtistSearchResponse
+	(*ArtistResult)(nil),              // 5: crate.provider.v1.ArtistResult
+	(*ArtistDetail)(nil),              // 6: crate.provider.v1.ArtistDetail
+	(*AlbumList)(nil),                 // 7: crate.provider.v1.AlbumList
+	(*AlbumSummary)(nil),              // 8: crate.provider.v1.AlbumSummary
+	(*AlbumDetail)(nil),               // 9: crate.provider.v1.AlbumDetail
+	(*TrackInfo)(nil),                 // 10: crate.provider.v1.TrackInfo
+	(*ArtistTrackSearchRequest)(nil),  // 11: crate.provider.v1.ArtistTrackSearchRequest
+	(*ArtistTrackSearchResponse)(nil), // 12: crate.provider.v1.ArtistTrackSearchResponse
+	(*TrackSearchResult)(nil),         // 13: crate.provider.v1.TrackSearchResult
+	nil,                               // 14: crate.provider.v1.ArtistResult.MetadataEntry
+	nil,                               // 15: crate.provider.v1.ArtistDetail.MetadataEntry
+	nil,                               // 16: crate.provider.v1.AlbumSummary.MetadataEntry
+	nil,                               // 17: crate.provider.v1.AlbumDetail.MetadataEntry
+	nil,                               // 18: crate.provider.v1.TrackInfo.MetadataEntry
 }
 var file_proto_provider_provider_proto_depIdxs = []int32{
 	5,  // 0: crate.provider.v1.ArtistSearchResponse.artists:type_name -> crate.provider.v1.ArtistResult
-	11, // 1: crate.provider.v1.ArtistResult.metadata:type_name -> crate.provider.v1.ArtistResult.MetadataEntry
-	12, // 2: crate.provider.v1.ArtistDetail.metadata:type_name -> crate.provider.v1.ArtistDetail.MetadataEntry
+	14, // 1: crate.provider.v1.ArtistResult.metadata:type_name -> crate.provider.v1.ArtistResult.MetadataEntry
+	15, // 2: crate.provider.v1.ArtistDetail.metadata:type_name -> crate.provider.v1.ArtistDetail.MetadataEntry
 	8,  // 3: crate.provider.v1.AlbumList.albums:type_name -> crate.provider.v1.AlbumSummary
-	13, // 4: crate.provider.v1.AlbumSummary.metadata:type_name -> crate.provider.v1.AlbumSummary.MetadataEntry
+	16, // 4: crate.provider.v1.AlbumSummary.metadata:type_name -> crate.provider.v1.AlbumSummary.MetadataEntry
 	10, // 5: crate.provider.v1.AlbumDetail.tracks:type_name -> crate.provider.v1.TrackInfo
-	14, // 6: crate.provider.v1.AlbumDetail.metadata:type_name -> crate.provider.v1.AlbumDetail.MetadataEntry
-	15, // 7: crate.provider.v1.TrackInfo.metadata:type_name -> crate.provider.v1.TrackInfo.MetadataEntry
-	0,  // 8: crate.provider.v1.MusicProvider.Info:input_type -> crate.provider.v1.InfoRequest
-	2,  // 9: crate.provider.v1.MusicProvider.SearchArtists:input_type -> crate.provider.v1.SearchRequest
-	3,  // 10: crate.provider.v1.MusicProvider.GetArtist:input_type -> crate.provider.v1.EntityRequest
-	3,  // 11: crate.provider.v1.MusicProvider.GetArtistAlbums:input_type -> crate.provider.v1.EntityRequest
-	3,  // 12: crate.provider.v1.MusicProvider.GetAlbum:input_type -> crate.provider.v1.EntityRequest
-	1,  // 13: crate.provider.v1.MusicProvider.Info:output_type -> crate.provider.v1.InfoResponse
-	4,  // 14: crate.provider.v1.MusicProvider.SearchArtists:output_type -> crate.provider.v1.ArtistSearchResponse
-	6,  // 15: crate.provider.v1.MusicProvider.GetArtist:output_type -> crate.provider.v1.ArtistDetail
-	7,  // 16: crate.provider.v1.MusicProvider.GetArtistAlbums:output_type -> crate.provider.v1.AlbumList
-	9,  // 17: crate.provider.v1.MusicProvider.GetAlbum:output_type -> crate.provider.v1.AlbumDetail
-	13, // [13:18] is the sub-list for method output_type
-	8,  // [8:13] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	17, // 6: crate.provider.v1.AlbumDetail.metadata:type_name -> crate.provider.v1.AlbumDetail.MetadataEntry
+	18, // 7: crate.provider.v1.TrackInfo.metadata:type_name -> crate.provider.v1.TrackInfo.MetadataEntry
+	13, // 8: crate.provider.v1.ArtistTrackSearchResponse.tracks:type_name -> crate.provider.v1.TrackSearchResult
+	0,  // 9: crate.provider.v1.MusicProvider.Info:input_type -> crate.provider.v1.InfoRequest
+	2,  // 10: crate.provider.v1.MusicProvider.SearchArtists:input_type -> crate.provider.v1.SearchRequest
+	3,  // 11: crate.provider.v1.MusicProvider.GetArtist:input_type -> crate.provider.v1.EntityRequest
+	3,  // 12: crate.provider.v1.MusicProvider.GetArtistAlbums:input_type -> crate.provider.v1.EntityRequest
+	3,  // 13: crate.provider.v1.MusicProvider.GetAlbum:input_type -> crate.provider.v1.EntityRequest
+	11, // 14: crate.provider.v1.MusicProvider.SearchArtistTracks:input_type -> crate.provider.v1.ArtistTrackSearchRequest
+	1,  // 15: crate.provider.v1.MusicProvider.Info:output_type -> crate.provider.v1.InfoResponse
+	4,  // 16: crate.provider.v1.MusicProvider.SearchArtists:output_type -> crate.provider.v1.ArtistSearchResponse
+	6,  // 17: crate.provider.v1.MusicProvider.GetArtist:output_type -> crate.provider.v1.ArtistDetail
+	7,  // 18: crate.provider.v1.MusicProvider.GetArtistAlbums:output_type -> crate.provider.v1.AlbumList
+	9,  // 19: crate.provider.v1.MusicProvider.GetAlbum:output_type -> crate.provider.v1.AlbumDetail
+	12, // 20: crate.provider.v1.MusicProvider.SearchArtistTracks:output_type -> crate.provider.v1.ArtistTrackSearchResponse
+	15, // [15:21] is the sub-list for method output_type
+	9,  // [9:15] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_proto_provider_provider_proto_init() }
@@ -897,7 +1117,7 @@ func file_proto_provider_provider_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_provider_provider_proto_rawDesc), len(file_proto_provider_provider_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

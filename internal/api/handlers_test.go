@@ -94,6 +94,7 @@ func (e *testEnv) do(method, path string, body string) *httptest.ResponseRecorde
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	e.server.ServeHTTP(w, req)
+	e.server.WaitBackground()
 	return w
 }
 
@@ -158,6 +159,25 @@ func (f *fakeProvider) GetArtistAlbums(ctx context.Context, req *pb.EntityReques
 		}, nil
 	}
 	return &pb.AlbumList{}, nil
+}
+
+func (f *fakeProvider) SearchArtistTracks(ctx context.Context, req *pb.ArtistTrackSearchRequest) (*pb.ArtistTrackSearchResponse, error) {
+	if req.ArtistId == "1000" {
+		all := []*pb.TrackSearchResult{
+			{Id: "3000", Title: "Track A1", DurationMs: 200000, AlbumId: "2000", AlbumTitle: "Album One", AlbumYear: 2023},
+			{Id: "3001", Title: "Track A2", DurationMs: 180000, AlbumId: "2000", AlbumTitle: "Album One", AlbumYear: 2023},
+			{Id: "3002", Title: "Track B1", DurationMs: 240000, AlbumId: "2001", AlbumTitle: "Album Two", AlbumYear: 2024},
+		}
+		q := strings.ToLower(req.Query)
+		var matched []*pb.TrackSearchResult
+		for _, t := range all {
+			if strings.Contains(strings.ToLower(t.Title), q) {
+				matched = append(matched, t)
+			}
+		}
+		return &pb.ArtistTrackSearchResponse{Tracks: matched}, nil
+	}
+	return &pb.ArtistTrackSearchResponse{}, nil
 }
 
 func (f *fakeProvider) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.AlbumDetail, error) {
@@ -366,6 +386,7 @@ func TestWatchArtistCreatesFullDiscography(t *testing.T) {
 	env := newTestEnv(t)
 	w := env.do("POST", "/api/watch/artist/1000", `{}`)
 
+
 	if w.Code != 201 {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
@@ -462,6 +483,7 @@ func TestWatchAllAlbumsForPartialArtist(t *testing.T) {
 	}
 
 	w = env.do("POST", "/api/watch/artist/1000", `{}`)
+
 	if w.Code != 200 && w.Code != 201 {
 		t.Fatalf("watch all: expected 200/201, got %d: %s", w.Code, w.Body.String())
 	}
@@ -557,6 +579,7 @@ func TestGetArtistWithAlbumsAndTracks(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
 
+
 	artists, _ := env.queries.ListArtists()
 	w := env.do("GET", fmt.Sprintf("/api/artists/%d", artists[0].ID), "")
 
@@ -586,6 +609,7 @@ func TestGetArtistNotFound(t *testing.T) {
 func TestGetAlbumWithTracks(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
+
 
 	artists, _ := env.queries.ListArtists()
 	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
@@ -1214,5 +1238,381 @@ func TestListOwnedTracksByArtist(t *testing.T) {
 	}
 	if owned[0].ArtistName != "Test Artist" {
 		t.Errorf("expected artist name populated, got %q", owned[0].ArtistName)
+	}
+}
+
+func TestLibrarySearch(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	w := env.do("GET", "/api/library/search?q=Track+A", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	results := decode[[]db.LibrarySearchResult](t, w)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results for 'Track A', got %d", len(results))
+	}
+	if results[0].ArtistName != "Test Artist" {
+		t.Errorf("expected artist name, got %q", results[0].ArtistName)
+	}
+}
+
+func TestLibrarySearchNoQuery(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/library/search", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	results := decode[[]db.LibrarySearchResult](t, w)
+	if len(results) != 0 {
+		t.Errorf("expected 0 results for empty query, got %d", len(results))
+	}
+}
+
+func TestBrowseArtistTrackSearch(t *testing.T) {
+	env := newTestEnv(t)
+
+	w := env.do("GET", "/api/browse/artist/1000/tracks?q=A1", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result struct {
+		Tracks []map[string]any `json:"tracks"`
+	}
+	json.NewDecoder(w.Body).Decode(&result)
+	if len(result.Tracks) != 1 {
+		t.Fatalf("expected 1 track matching 'A1', got %d", len(result.Tracks))
+	}
+}
+
+func TestBrowseArtistTrackSearchEmptyQuery(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/browse/artist/1000/tracks?q=", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var result struct {
+		Tracks []map[string]any `json:"tracks"`
+	}
+	json.NewDecoder(w.Body).Decode(&result)
+	if len(result.Tracks) != 0 {
+		t.Errorf("expected 0 tracks for empty query, got %d", len(result.Tracks))
+	}
+}
+
+func TestClearDownloadsByStatus(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+	env.do("POST", "/api/downloads/queue", "")
+
+	downloads, _ := env.queries.ListDownloads("pending")
+	errStr := "test error"
+	for _, d := range downloads[:2] {
+		env.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusFailed, nil, &errStr)
+	}
+
+	w := env.do("DELETE", "/api/downloads/clear?status=failed", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	result := decode[map[string]int](t, w)
+	if result["deleted"] != 2 {
+		t.Errorf("expected 2 deleted, got %d", result["deleted"])
+	}
+
+	remaining, _ := env.queries.ListDownloads("")
+	if len(remaining) != 1 {
+		t.Errorf("expected 1 remaining download, got %d", len(remaining))
+	}
+}
+
+func TestClearDownloadsBadStatus(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("DELETE", "/api/downloads/clear?status=pending", "")
+	if w.Code != 400 {
+		t.Errorf("expected 400 for invalid clear status, got %d", w.Code)
+	}
+}
+
+func TestWantedTracksWithCooldown(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	// All 3 tracks are wanted
+	all, _ := env.queries.ListWantedTracks()
+	if len(all) != 3 {
+		t.Fatalf("expected 3 wanted tracks, got %d", len(all))
+	}
+
+	// Enqueue and fail one track
+	env.queries.EnqueueDownload(all[0].ID)
+	downloads, _ := env.queries.ListDownloads("pending")
+	errStr := "no results"
+	env.queries.UpdateDownloadStatus(downloads[0].ID, models.DownloadStatusFailed, nil, &errStr)
+	env.queries.UpdateTrackStatus(all[0].ID, models.TrackStatusWanted)
+
+	// Past cutoff: any failure after 2000 is "recent" → failed track excluded
+	cutoff := "2000-01-01T00:00:00Z"
+	filtered, _ := env.queries.ListWantedTracksWithCooldown(cutoff, 0)
+	if len(filtered) != 2 {
+		t.Errorf("expected 2 tracks (failed one excluded by past cutoff), got %d", len(filtered))
+	}
+
+	// Future cutoff: nothing failed after 2099 → all tracks included
+	cutoff = "2099-01-01T00:00:00Z"
+	filtered, _ = env.queries.ListWantedTracksWithCooldown(cutoff, 0)
+	if len(filtered) != 3 {
+		t.Errorf("expected 3 tracks (nothing excluded by future cutoff), got %d", len(filtered))
+	}
+}
+
+func TestWantedTracksLimited(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	all, _ := env.queries.ListWantedTracks()
+	if len(all) != 3 {
+		t.Fatalf("expected 3 wanted tracks, got %d", len(all))
+	}
+
+	limited, _ := env.queries.ListWantedTracksLimited(2)
+	if len(limited) != 2 {
+		t.Errorf("expected 2 tracks with limit=2, got %d", len(limited))
+	}
+
+	unlimited, _ := env.queries.ListWantedTracksLimited(0)
+	if len(unlimited) != 3 {
+		t.Errorf("expected 3 tracks with limit=0, got %d", len(unlimited))
+	}
+}
+
+func TestWantedTracksWithCooldownAndLimit(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	all, _ := env.queries.ListWantedTracks()
+	env.queries.EnqueueDownload(all[0].ID)
+	downloads, _ := env.queries.ListDownloads("pending")
+	errStr := "no results"
+	env.queries.UpdateDownloadStatus(downloads[0].ID, models.DownloadStatusFailed, nil, &errStr)
+	env.queries.UpdateTrackStatus(all[0].ID, models.TrackStatusWanted)
+
+	// Past cutoff excludes the failed one (2 remain), limit to 1
+	cutoff := "2000-01-01T00:00:00Z"
+	filtered, _ := env.queries.ListWantedTracksWithCooldown(cutoff, 1)
+	if len(filtered) != 1 {
+		t.Errorf("expected 1 track with cooldown+limit, got %d", len(filtered))
+	}
+}
+
+// seedLargeLibrary creates numArtists artists, each with albumsPerArtist albums,
+// each with tracksPerAlbum tracks. All tracks start as "wanted".
+func seedLargeLibrary(t *testing.T, q *db.Queries, numArtists, albumsPerArtist, tracksPerAlbum int) []int64 {
+	t.Helper()
+	var trackIDs []int64
+	for i := 0; i < numArtists; i++ {
+		artist := models.Artist{
+			Name:       fmt.Sprintf("Artist %03d", i),
+			Provider:   "test",
+			ProviderID: fmt.Sprintf("a-%d", i),
+			Status:     models.ArtistStatusWatched,
+		}
+		if err := q.CreateArtist(&artist); err != nil {
+			t.Fatalf("create artist %d: %v", i, err)
+		}
+		for j := 0; j < albumsPerArtist; j++ {
+			album := models.Album{
+				ArtistID:   artist.ID,
+				Title:      fmt.Sprintf("Album %03d-%02d", i, j),
+				Provider:   "test",
+				ProviderID: fmt.Sprintf("al-%d-%d", i, j),
+				RecordType: "album",
+				Status:     models.AlbumStatusWatched,
+			}
+			if err := q.CreateAlbum(&album); err != nil {
+				t.Fatalf("create album %d-%d: %v", i, j, err)
+			}
+			for k := 0; k < tracksPerAlbum; k++ {
+				track := models.Track{
+					AlbumID:     album.ID,
+					Title:       fmt.Sprintf("Song %03d-%02d-%02d", i, j, k),
+					TrackNumber: k + 1,
+					DiscNumber:  1,
+					DurationMs:  200000,
+					Provider:    "test",
+					ProviderID:  fmt.Sprintf("t-%d-%d-%d", i, j, k),
+					Status:      models.TrackStatusWanted,
+				}
+				if err := q.CreateTrack(&track); err != nil {
+					t.Fatalf("create track %d-%d-%d: %v", i, j, k, err)
+				}
+				trackIDs = append(trackIDs, track.ID)
+			}
+		}
+	}
+	return trackIDs
+}
+
+func TestLargeLibraryBatchCap(t *testing.T) {
+	env := newTestEnv(t)
+	trackIDs := seedLargeLibrary(t, env.queries, 40, 5, 20) // 40 × 5 × 20 = 4000 tracks
+
+	if len(trackIDs) != 4000 {
+		t.Fatalf("expected 4000 tracks seeded, got %d", len(trackIDs))
+	}
+
+	all, err := env.queries.ListWantedTracks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 4000 {
+		t.Fatalf("expected 4000 wanted, got %d", len(all))
+	}
+
+	// Batch cap should limit results
+	limited, err := env.queries.ListWantedTracksLimited(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 50 {
+		t.Errorf("expected 50 tracks with limit, got %d", len(limited))
+	}
+
+	limited, err = env.queries.ListWantedTracksLimited(200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 200 {
+		t.Errorf("expected 200 tracks with limit, got %d", len(limited))
+	}
+
+	// Unlimited returns all
+	unlimited, err := env.queries.ListWantedTracksLimited(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unlimited) != 4000 {
+		t.Errorf("expected 4000 tracks unlimited, got %d", len(unlimited))
+	}
+}
+
+func TestLargeLibraryCooldownAtScale(t *testing.T) {
+	env := newTestEnv(t)
+	trackIDs := seedLargeLibrary(t, env.queries, 40, 5, 20) // 4000 tracks
+
+	// Fail 500 of them
+	for _, id := range trackIDs[:500] {
+		env.queries.EnqueueDownload(id)
+	}
+	downloads, _ := env.queries.ListDownloads("pending")
+	errStr := "no results"
+	for _, d := range downloads {
+		env.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusFailed, nil, &errStr)
+		env.queries.UpdateTrackStatus(d.TrackID, models.TrackStatusWanted)
+	}
+
+	// Past cutoff: 500 failed tracks excluded, 3500 remain
+	cutoff := "2000-01-01T00:00:00Z"
+	filtered, err := env.queries.ListWantedTracksWithCooldown(cutoff, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 3500 {
+		t.Errorf("expected 3500 tracks after cooldown excludes 500, got %d", len(filtered))
+	}
+
+	// Cooldown + batch cap: 3500 eligible, cap at 50
+	filtered, err = env.queries.ListWantedTracksWithCooldown(cutoff, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 50 {
+		t.Errorf("expected 50 tracks with cooldown+cap, got %d", len(filtered))
+	}
+
+	// Future cutoff: nothing excluded, all 4000 returned
+	cutoff = "2099-01-01T00:00:00Z"
+	filtered, err = env.queries.ListWantedTracksWithCooldown(cutoff, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 4000 {
+		t.Errorf("expected 4000 tracks with expired cooldown, got %d", len(filtered))
+	}
+}
+
+func TestLargeLibrarySearchResults(t *testing.T) {
+	env := newTestEnv(t)
+	seedLargeLibrary(t, env.queries, 40, 5, 20) // 4000 tracks, titles like "Song 000-00-00"
+
+	// Search for a specific artist's tracks
+	results, err := env.queries.SearchLibrary("Song 005", 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Artist 005 has 5 albums × 20 tracks = 100 tracks matching "Song 005-"
+	if len(results) != 100 {
+		t.Errorf("expected 100 results for 'Song 005', got %d", len(results))
+	}
+	for _, r := range results {
+		if r.ArtistName != "Artist 005" {
+			t.Errorf("expected artist 'Artist 005', got %q", r.ArtistName)
+			break
+		}
+	}
+
+	// Search for a specific track
+	results, err = env.queries.SearchLibrary("Song 003-01-07", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result for exact track, got %d", len(results))
+	}
+
+	// Search with limit smaller than matches
+	results, err = env.queries.SearchLibrary("Song 00", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 5 {
+		t.Errorf("expected 5 results with limit, got %d", len(results))
+	}
+
+	// Broad search returns many across artists
+	results, err = env.queries.SearchLibrary("Song 0", 4000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 4000 {
+		t.Errorf("expected 4000 results for broad search, got %d", len(results))
+	}
+}
+
+func TestLargeLibraryEnqueueBatch(t *testing.T) {
+	env := newTestEnv(t)
+	trackIDs := seedLargeLibrary(t, env.queries, 40, 5, 20) // 4000 tracks
+
+	queued, err := env.queries.EnqueueDownloadBatch(trackIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued != 4000 {
+		t.Errorf("expected 4000 queued, got %d", queued)
+	}
+
+	downloads, _ := env.queries.ListDownloads("pending")
+	if len(downloads) != 4000 {
+		t.Errorf("expected 4000 pending downloads, got %d", len(downloads))
+	}
+
+	// Batch enqueue again should be idempotent
+	queued, err = env.queries.EnqueueDownloadBatch(trackIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued != 0 {
+		t.Errorf("expected 0 queued on duplicate batch, got %d", queued)
 	}
 }

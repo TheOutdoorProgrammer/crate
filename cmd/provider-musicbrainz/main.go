@@ -199,6 +199,7 @@ func (s *server) GetArtistAlbums(ctx context.Context, req *pb.EntityRequest) (*p
 			Id:         rg.ID,
 			Title:      rg.Title,
 			Year:       int32(year),
+			CoverUrl:   "https://coverartarchive.org/release-group/" + rg.ID + "/front-250",
 			RecordType: recordType,
 			Rank:       int32(len(resp.ReleaseGroups) - i),
 			Metadata: map[string]string{
@@ -278,9 +279,68 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 		Id:         rgResp.ID,
 		Title:      rgResp.Title,
 		Year:       int32(year),
+		CoverUrl:   "https://coverartarchive.org/release-group/" + rgResp.ID + "/front-250",
 		ArtistName: artistName,
 		Tracks:     tracks,
 	}, nil
+}
+
+func (s *server) SearchArtistTracks(ctx context.Context, req *pb.ArtistTrackSearchRequest) (*pb.ArtistTrackSearchResponse, error) {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var resp struct {
+		Recordings []struct {
+			ID     string `json:"id"`
+			Title  string `json:"title"`
+			Length int    `json:"length"`
+			Releases []struct {
+				ID           string `json:"id"`
+				Title        string `json:"title"`
+				Date         string `json:"date"`
+				ReleaseGroup struct {
+					ID string `json:"id"`
+				} `json:"release-group"`
+			} `json:"releases"`
+		} `json:"recordings"`
+	}
+
+	path := fmt.Sprintf("/recording/?query=arid:%s AND recording:%s&limit=%d&fmt=json",
+		req.ArtistId, url.QueryEscape(req.Query), limit)
+	if err := s.get(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+
+	seen := map[string]bool{}
+	var tracks []*pb.TrackSearchResult
+	for _, rec := range resp.Recordings {
+		if seen[rec.ID] {
+			continue
+		}
+		seen[rec.ID] = true
+
+		t := &pb.TrackSearchResult{
+			Id:         rec.ID,
+			Title:      rec.Title,
+			DurationMs: int32(rec.Length),
+		}
+		if len(rec.Releases) > 0 {
+			rel := rec.Releases[0]
+			rgID := rel.ReleaseGroup.ID
+			if rgID == "" {
+				rgID = rel.ID
+			}
+			t.AlbumId = rgID
+			t.AlbumTitle = rel.Title
+			t.AlbumCoverUrl = "https://coverartarchive.org/release-group/" + rgID + "/front-250"
+			t.AlbumYear = int32(parseYear(rel.Date))
+		}
+		tracks = append(tracks, t)
+	}
+
+	return &pb.ArtistTrackSearchResponse{Tracks: tracks}, nil
 }
 
 func (s *server) get(ctx context.Context, path string, out any) error {

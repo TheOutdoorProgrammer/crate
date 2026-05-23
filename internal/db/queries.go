@@ -327,22 +327,61 @@ func (q *Queries) GetTrackWithMeta(id int64) (*models.Track, error) {
 }
 
 func (q *Queries) ListWantedTracks() ([]models.Track, error) {
-	rows, err := q.db.Query(
-		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
-		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from,
-		        t.download_format, t.download_bitrate, t.created_at, t.updated_at,
-		        al.title, ar.name
-		 FROM tracks t
-		 JOIN albums al ON al.id = t.album_id
-		 JOIN artists ar ON ar.id = al.artist_id
-		 WHERE t.status = 'wanted'
-		 ORDER BY ar.name, al.year, t.disc_number, t.track_number`,
-	)
+	return q.ListWantedTracksLimited(0)
+}
+
+func (q *Queries) ListWantedTracksLimited(limit int) ([]models.Track, error) {
+	query := `SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
+	                 t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from,
+	                 t.download_format, t.download_bitrate, t.created_at, t.updated_at,
+	                 al.title, ar.name
+	          FROM tracks t
+	          JOIN albums al ON al.id = t.album_id
+	          JOIN artists ar ON ar.id = al.artist_id
+	          WHERE t.status = 'wanted'
+	          ORDER BY ar.name, al.year, t.disc_number, t.track_number`
+	var args []any
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := q.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanTracks(rows)
+}
 
+func (q *Queries) ListWantedTracksWithCooldown(cooldownCutoff string, limit int) ([]models.Track, error) {
+	query := `SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
+	                 t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from,
+	                 t.download_format, t.download_bitrate, t.created_at, t.updated_at,
+	                 al.title, ar.name
+	          FROM tracks t
+	          JOIN albums al ON al.id = t.album_id
+	          JOIN artists ar ON ar.id = al.artist_id
+	          WHERE t.status = 'wanted'
+	            AND NOT EXISTS (
+	              SELECT 1 FROM download_queue d
+	              WHERE d.track_id = t.id AND d.status = 'failed'
+	                AND d.last_attempt > ?
+	            )
+	          ORDER BY ar.name, al.year, t.disc_number, t.track_number`
+	args := []any{cooldownCutoff}
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := q.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTracks(rows)
+}
+
+func scanTracks(rows *sql.Rows) ([]models.Track, error) {
 	var tracks []models.Track
 	for rows.Next() {
 		var t models.Track
@@ -582,9 +621,59 @@ func (q *Queries) ListDownloadsWithTrack(status string) ([]models.DownloadQueueI
 	return items, rows.Err()
 }
 
+func (q *Queries) EnqueueDownloadBatch(trackIDs []int64) (int, error) {
+	if len(trackIDs) == 0 {
+		return 0, nil
+	}
+	tx, err := q.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(
+		`INSERT INTO download_queue (track_id, status, created_at)
+		 VALUES (?, 'pending', ?)
+		 ON CONFLICT (track_id) WHERE status IN ('pending', 'searching', 'downloading', 'organizing') DO NOTHING`,
+	)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	ts := now()
+	queued := 0
+	for _, id := range trackIDs {
+		result, err := stmt.Exec(id, ts)
+		if err != nil {
+			continue
+		}
+		if n, _ := result.RowsAffected(); n > 0 {
+			queued++
+		}
+	}
+	return queued, tx.Commit()
+}
+
+func (q *Queries) CountActiveDownloads() (int, error) {
+	var count int
+	err := q.db.QueryRow(
+		`SELECT COUNT(*) FROM download_queue WHERE status IN ('searching', 'downloading')`,
+	).Scan(&count)
+	return count, err
+}
+
 func (q *Queries) DeleteDownload(id int64) error {
 	_, err := q.db.Exec(`DELETE FROM download_queue WHERE id = ?`, id)
 	return err
+}
+
+func (q *Queries) DeleteDownloadsByStatus(status string) (int64, error) {
+	result, err := q.db.Exec(`DELETE FROM download_queue WHERE status = ?`, status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 func (q *Queries) UpdateDownloadStatus(id int64, status models.DownloadStatus, searchID *string, err *string) error {
@@ -665,6 +754,48 @@ func (q *Queries) ListBlacklisted() ([]map[string]string, error) {
 		items = append(items, map[string]string{"username": u, "filename": f, "reason": r, "created_at": c})
 	}
 	return items, rows.Err()
+}
+
+// Library Search
+
+type LibrarySearchResult struct {
+	ArtistID   int64  `json:"artist_id"`
+	ArtistName string `json:"artist_name"`
+	AlbumID    int64  `json:"album_id"`
+	AlbumTitle string `json:"album_title"`
+	TrackID    int64  `json:"track_id"`
+	TrackTitle string `json:"track_title"`
+}
+
+func (q *Queries) SearchLibrary(query string, limit int) ([]LibrarySearchResult, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	pattern := "%" + query + "%"
+	rows, err := q.db.Query(
+		`SELECT ar.id, ar.name, al.id, al.title, t.id, t.title
+		 FROM tracks t
+		 JOIN albums al ON al.id = t.album_id
+		 JOIN artists ar ON ar.id = al.artist_id
+		 WHERE t.title LIKE ? COLLATE NOCASE
+		 ORDER BY ar.name, al.title, t.track_number
+		 LIMIT ?`,
+		pattern, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []LibrarySearchResult
+	for rows.Next() {
+		var r LibrarySearchResult
+		if err := rows.Scan(&r.ArtistID, &r.ArtistName, &r.AlbumID, &r.AlbumTitle, &r.TrackID, &r.TrackTitle); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
 }
 
 // Settings

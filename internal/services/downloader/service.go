@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/slskd"
 )
+
+const defaultMaxConcurrentSlskd = 10
 
 type Organizer interface {
 	Organize(track *models.Track) error
@@ -99,15 +102,27 @@ func (s *Service) tick(ctx context.Context) {
 		}
 	}
 
+	maxConcurrent := s.getMaxConcurrent()
+	activeCount, err := s.queries.CountActiveDownloads()
+	if err != nil {
+		slog.Error("downloader: count active", "error", err)
+		activeCount = 0
+	}
+	slots := maxConcurrent - activeCount
+
 	pending, err := s.queries.ListDownloads("pending")
 	if err != nil {
 		slog.Error("downloader: list pending", "error", err)
 		return
 	}
 	for _, d := range pending {
+		if slots <= 0 {
+			break
+		}
 		if err := s.process(ctx, d); err != nil {
 			slog.Error("downloader: process", "download_id", d.ID, "error", err)
 		}
+		slots--
 	}
 
 	searching, err := s.queries.ListDownloads("searching")
@@ -139,6 +154,18 @@ func (s *Service) tick(ctx context.Context) {
 			slog.Error("downloader: retry organize", "download_id", d.ID, "error", err)
 		}
 	}
+}
+
+func (s *Service) getMaxConcurrent() int {
+	v, err := s.queries.GetSetting("max_concurrent_slskd")
+	if err != nil {
+		return defaultMaxConcurrentSlskd
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return defaultMaxConcurrentSlskd
+	}
+	return n
 }
 
 // process kicks off a search for a pending download item.

@@ -130,7 +130,28 @@ func (s *Service) detectNewReleases(ctx context.Context) {
 }
 
 func (s *Service) queueWantedTracks() {
-	tracks, err := s.queries.ListWantedTracks()
+	cooldownDays := 7
+	if v, err := s.queries.GetSetting("requeue_cooldown_days"); err == nil && v != "" {
+		if d, err := strconv.Atoi(v); err == nil && d >= 0 {
+			cooldownDays = d
+		}
+	}
+
+	maxQueue := 50
+	if v, err := s.queries.GetSetting("max_auto_queue"); err == nil && v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			maxQueue = n
+		}
+	}
+
+	var tracks []models.Track
+	var err error
+	if cooldownDays > 0 {
+		cutoff := time.Now().UTC().Add(-time.Duration(cooldownDays) * 24 * time.Hour).Format(time.RFC3339)
+		tracks, err = s.queries.ListWantedTracksWithCooldown(cutoff, maxQueue)
+	} else {
+		tracks, err = s.queries.ListWantedTracksLimited(maxQueue)
+	}
 	if err != nil {
 		slog.Error("scheduler: list wanted", "error", err)
 		return
@@ -142,7 +163,7 @@ func (s *Service) queueWantedTracks() {
 		}
 	}
 	if queued > 0 {
-		slog.Info("scheduler: queued wanted tracks", "count", queued)
+		slog.Info("scheduler: queued wanted tracks", "count", queued, "limit", maxQueue, "cooldown_days", cooldownDays)
 	}
 }
 

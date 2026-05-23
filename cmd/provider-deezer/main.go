@@ -232,6 +232,63 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 	}, nil
 }
 
+func (s *server) SearchArtistTracks(ctx context.Context, req *pb.ArtistTrackSearchRequest) (*pb.ArtistTrackSearchResponse, error) {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	// Deezer search supports artist and track filters
+	q := fmt.Sprintf("artist:\"%s\" track:\"%s\"", req.ArtistId, req.Query)
+
+	// First, get artist name since ArtistId is numeric
+	var artistResp struct {
+		Name string `json:"name"`
+	}
+	if err := s.get(ctx, "/artist/"+req.ArtistId, &artistResp); err == nil && artistResp.Name != "" {
+		q = fmt.Sprintf("artist:\"%s\" track:\"%s\"", artistResp.Name, req.Query)
+	}
+
+	var resp struct {
+		Data []struct {
+			ID       int64  `json:"id"`
+			Title    string `json:"title"`
+			Duration int    `json:"duration"`
+			Album    struct {
+				ID          int64  `json:"id"`
+				Title       string `json:"title"`
+				CoverMedium string `json:"cover_medium"`
+				ReleaseDate string `json:"release_date"`
+			} `json:"album"`
+		} `json:"data"`
+	}
+
+	path := fmt.Sprintf("/search/track?q=%s&limit=%d", url.QueryEscape(q), limit)
+	if err := s.get(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+
+	seen := map[int64]bool{}
+	var tracks []*pb.TrackSearchResult
+	for _, t := range resp.Data {
+		if seen[t.ID] {
+			continue
+		}
+		seen[t.ID] = true
+		tracks = append(tracks, &pb.TrackSearchResult{
+			Id:            strconv.FormatInt(t.ID, 10),
+			Title:         t.Title,
+			DurationMs:    int32(t.Duration * 1000),
+			AlbumId:       strconv.FormatInt(t.Album.ID, 10),
+			AlbumTitle:    t.Album.Title,
+			AlbumCoverUrl: t.Album.CoverMedium,
+			AlbumYear:     int32(parseYear(t.Album.ReleaseDate)),
+		})
+	}
+
+	return &pb.ArtistTrackSearchResponse{Tracks: tracks}, nil
+}
+
 func (s *server) get(ctx context.Context, path string, out any) error {
 	if err := s.limiter.Wait(ctx); err != nil {
 		return err

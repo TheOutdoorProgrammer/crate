@@ -4,15 +4,17 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
 import { formatTotalDuration } from '../lib/format';
+import FilterBar from '../components/FilterBar';
 import ProviderBadge from '../components/ProviderBadge';
 import ProgressBar from '../components/ProgressBar';
-import type { Track, ProviderInfo } from '../types/index';
+import type { Track, Album, ProviderInfo } from '../types/index';
 
 export default function ArtistDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [trackFilter, setTrackFilter] = useState('');
   const [showRelinkSearch, setShowRelinkSearch] = useState(false);
   const [relinkQuery, setRelinkQuery] = useState('');
   const [relinkProvider, setRelinkProvider] = useState('');
@@ -21,7 +23,14 @@ export default function ArtistDetail() {
     queryKey: ['artist', id],
     queryFn: () => api.getArtist(Number(id)),
     enabled: !!id,
-    refetchInterval: 10_000,
+    refetchInterval: (query) => {
+      const a = query.state.data;
+      if (!a?.albums) return false;
+      const hasActive = a.albums.some((al: any) =>
+        al.tracks?.some((t: any) => t.status === 'downloading' || t.status === 'searching')
+      );
+      return hasActive ? 10_000 : false;
+    },
   });
 
   const { data: providers } = useQuery({
@@ -37,7 +46,18 @@ export default function ArtistDetail() {
 
   const toggleNewReleases = useMutation({
     mutationFn: (enabled: boolean) => api.toggleNewReleases(Number(id), enabled),
-    onSuccess: () => {
+    onMutate: async (enabled) => {
+      await queryClient.cancelQueries({ queryKey: ['artist', id] });
+      const prev = queryClient.getQueryData(['artist', id]);
+      queryClient.setQueryData(['artist', id], (old: any) =>
+        old ? { ...old, watch_new_releases: enabled } : old
+      );
+      return { prev };
+    },
+    onError: (_err, _enabled, context) => {
+      if (context?.prev) queryClient.setQueryData(['artist', id], context.prev);
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['artist', id] });
       queryClient.invalidateQueries({ queryKey: ['artists'] });
     },
@@ -100,6 +120,16 @@ export default function ArtistDetail() {
 
     return { totalTracks, ownedTracks, totalDuration, wantedTracks, recordTypes };
   }, [artist]);
+
+  const filteredAlbums = useMemo((): Album[] => {
+    if (!artist?.albums) return [];
+    if (!trackFilter) return artist.albums;
+    const q = trackFilter.toLowerCase();
+    return artist.albums.filter((album) => {
+      if (album.title.toLowerCase().includes(q)) return true;
+      return album.tracks?.some((t) => t.title.toLowerCase().includes(q)) ?? false;
+    });
+  }, [artist?.albums, trackFilter]);
 
   if (isLoading) {
     return (
@@ -292,8 +322,16 @@ export default function ArtistDetail() {
       {artist.albums && artist.albums.length > 0 && (
         <div>
           <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Albums</p>
+          <FilterBar
+            value={trackFilter}
+            onChange={setTrackFilter}
+            placeholder="Filter by song or album title..."
+          />
+          {trackFilter && filteredAlbums.length === 0 && (
+            <p className="text-zinc-500 text-sm text-center py-4">No matching albums or tracks</p>
+          )}
           <div className="space-y-1">
-            {artist.albums.map((album) => (
+            {filteredAlbums.map((album) => (
               <Link
                 key={album.id}
                 to={`/album/${album.id}`}
@@ -301,7 +339,7 @@ export default function ArtistDetail() {
               >
                 <div className="w-10 h-10 rounded bg-zinc-700 overflow-hidden shrink-0">
                   {album.cover_url ? (
-                    <img src={album.cover_url} alt="" className="w-full h-full object-cover" />
+                    <img src={album.cover_url} alt="" className="w-full h-full object-cover" onError={(e) => (e.target as HTMLImageElement).style.display = 'none'} />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-zinc-500">
                       <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="1" /></svg>
@@ -319,6 +357,11 @@ export default function ArtistDetail() {
                   </div>
                   <p className="text-[11px] text-zinc-500">
                     {album.year && `${album.year} · `}{album.tracks?.length || 0} tracks
+                    {trackFilter && album.tracks && (() => {
+                      const q = trackFilter.toLowerCase();
+                      const count = album.tracks.filter((t) => t.title.toLowerCase().includes(q)).length;
+                      return count > 0 ? ` · ${count} match${count > 1 ? 'es' : ''}` : '';
+                    })()}
                   </p>
                 </div>
                 <AlbumStatusSummary tracks={album.tracks} />
