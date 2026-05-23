@@ -127,7 +127,7 @@ export default function AlbumDetail() {
     if (!trackFilter) return album.tracks;
     const q = trackFilter.toLowerCase();
     return album.tracks.filter((t) => t.title.toLowerCase().includes(q));
-  }, [album?.tracks, trackFilter]);
+  }, [album, trackFilter]);
 
   if (isLoading) {
     return (

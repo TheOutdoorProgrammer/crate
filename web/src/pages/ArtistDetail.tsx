@@ -26,8 +26,8 @@ export default function ArtistDetail() {
     refetchInterval: (query) => {
       const a = query.state.data;
       if (!a?.albums) return false;
-      const hasActive = a.albums.some((al: any) =>
-        al.tracks?.some((t: any) => t.status === 'downloading' || t.status === 'searching')
+      const hasActive = a.albums.some((al: Album) =>
+        al.tracks?.some((t: Track) => t.status === 'downloading' || t.status === 'searching')
       );
       return hasActive ? 10_000 : false;
     },
@@ -49,7 +49,7 @@ export default function ArtistDetail() {
     onMutate: async (enabled) => {
       await queryClient.cancelQueries({ queryKey: ['artist', id] });
       const prev = queryClient.getQueryData(['artist', id]);
-      queryClient.setQueryData(['artist', id], (old: any) =>
+      queryClient.setQueryData(['artist', id], (old: Record<string, unknown> | undefined) =>
         old ? { ...old, watch_new_releases: enabled } : old
       );
       return { prev };
@@ -129,7 +129,7 @@ export default function ArtistDetail() {
       if (album.title.toLowerCase().includes(q)) return true;
       return album.tracks?.some((t) => t.title.toLowerCase().includes(q)) ?? false;
     });
-  }, [artist?.albums, trackFilter]);
+  }, [artist, trackFilter]);
 
   if (isLoading) {
     return (

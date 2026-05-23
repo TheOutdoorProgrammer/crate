@@ -16,7 +16,7 @@ export default function Downloads() {
     refetchInterval: (query) => {
       const dl = query.state.data;
       if (!dl) return 5000;
-      const hasActive = dl.some((d: any) =>
+      const hasActive = dl.some((d: DownloadQueueItem) =>
         d.status === 'pending' || d.status === 'searching' || d.status === 'downloading' || d.status === 'organizing'
       );
       return hasActive ? 5000 : false;

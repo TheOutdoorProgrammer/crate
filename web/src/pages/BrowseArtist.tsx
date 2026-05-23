@@ -70,7 +70,7 @@ export default function BrowseArtist() {
       if (album.title.toLowerCase().includes(q)) return true;
       return matchingAlbumIds?.has(album.id) ?? false;
     });
-  }, [artist?.albums, debouncedFilter, matchingAlbumIds]);
+  }, [artist, debouncedFilter, matchingAlbumIds]);
 
   if (isLoading) {
     return (
