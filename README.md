@@ -62,13 +62,13 @@ Open `http://localhost:6969`.
 - **Pluggable providers** -- search via MusicBrainz, Deezer, or custom gRPC providers. Switch providers on the fly from the search UI.
 - **Search** -- find artists, browse their full discography with metadata
 - **Watch** -- save artists, albums, or individual tracks to your library
-- **Download** -- searches slskd (Soulseek), picks the best FLAC or 320kbps MP3, downloads automatically
+- **Download** -- searches slskd (Soulseek), picks the best file from supported formats, downloads automatically
 - **Retry with backoff** -- failed downloads retry with backoff (5m → 15m → 30m → 1h, gives up after ~2h). Failed sources are blacklisted per-user per-file so they're never retried.
 - **Manual search** -- browse all slskd results for a track, see scores/format/queue info, and pick which one to download
 - **Quality upgrades** -- configure priority-ordered quality tiers (e.g. FLAC > MP3 320 > MP3 256). Scheduler scans one artist per day and re-queues tracks that can be upgraded.
 - **Navidrome integration** -- optionally trigger a Navidrome library scan after each download so new files appear immediately
 - **Organize** -- moves completed files to `library/{Artist}/{Album (Year)}/{nn} - {Title}.ext`
-- **Metadata tagging** -- writes ID3v2 (MP3) and Vorbis comments (FLAC) with artist, album, track, year, and cover art
+- **Metadata tagging** -- writes ID3v2 (MP3), Vorbis comments (FLAC), and RIFF INFO (WAV) with artist, album, track, year, and cover art (MP3/FLAC)
 - **New release detection** -- opt-in per artist, auto-adds albums released after the feature is enabled
 - **File integrity** -- daily check that owned tracks still exist on disk; reverts to "wanted" if missing
 - **Activity log** -- tracks all download activity (search, download, complete, fail) in a separate SQLite DB with configurable retention
@@ -108,6 +108,20 @@ Crate does not include built-in authentication. If you need to restrict access, 
 - **Backend**: Go + Chi + SQLite (pure Go, no CGO)
 - **Frontend**: React + TypeScript + Vite + Tailwind
 - **Providers**: MusicBrainz + Deezer via gRPC (extensible)
-- **Tagging**: ID3v2 (MP3), Vorbis comments (FLAC)
+- **Tagging**: ID3v2 (MP3), Vorbis comments (FLAC), RIFF INFO (WAV)
 - **Downloads**: slskd (Soulseek client)
 - **Deployment**: Docker (single multi-stage container)
+
+## Supported Formats
+
+| Format | Download | Metadata tagging | Cover art |
+|--------|----------|-----------------|-----------|
+| FLAC   | Yes      | Yes (Vorbis comments) | Yes |
+| MP3    | Yes      | Yes (ID3v2) | Yes |
+| WAV    | Yes      | Yes (RIFF INFO) | No |
+| OGG    | Yes      | No | No |
+| Opus   | Yes      | No | No |
+| AAC    | Yes      | No | No |
+| M4A    | Yes      | No | No |
+
+All formats are downloaded, organized into the library folder, and tracked in the database. Formats without tagging support are still fully functional -- they just won't have embedded metadata written by Crate.

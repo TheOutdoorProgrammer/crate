@@ -11,25 +11,15 @@ interface QualityTier {
 
 const settingsSections = [
   {
-    title: 'slskd Connection',
+    title: 'slskd',
     fields: [
-      { key: 'slskd_url', label: 'URL', placeholder: 'http://localhost:5030' },
-      { key: 'slskd_api_key', label: 'API Key', placeholder: 'Your slskd API key', type: 'password' },
-      { key: 'max_concurrent_slskd', label: 'Max Concurrent Downloads', placeholder: '10' },
-    ],
-  },
-  {
-    title: 'Library',
-    fields: [
-      { key: 'library_path', label: 'Library Path', placeholder: '/music' },
-      { key: 'download_format_preference', label: 'Format Preference', placeholder: 'flac,mp3' },
-      { key: 'min_bitrate', label: 'Min Bitrate (kbps)', placeholder: '256' },
+      { key: 'max_concurrent_slskd', label: 'Max Concurrent Downloads', placeholder: '10', type: 'number', description: 'How many files to download from Soulseek at the same time' },
     ],
   },
   {
     title: 'Navidrome (optional)',
     fields: [
-      { key: 'navidrome_url', label: 'URL', placeholder: 'http://localhost:4533' },
+      { key: 'navidrome_url', label: 'URL', placeholder: 'http://localhost:4533', description: 'Triggers a library scan after each download' },
       { key: 'navidrome_user', label: 'Username', placeholder: 'admin' },
       { key: 'navidrome_password', label: 'Password', placeholder: 'Navidrome password', type: 'password' },
     ],
@@ -37,11 +27,10 @@ const settingsSections = [
   {
     title: 'Scheduling',
     fields: [
-      { key: 'scan_interval', label: 'Scan Interval', placeholder: '6h' },
-      { key: 'max_auto_queue', label: 'Max Auto-Queue Per Cycle', placeholder: '50' },
-      { key: 'requeue_cooldown_days', label: 'Re-queue Cooldown (days)', placeholder: '7' },
-      { key: 'cache_ttl_hours', label: 'Cache TTL (hours)', placeholder: '24' },
-      { key: 'activity_retention_days', label: 'Activity Retention (days)', placeholder: '30' },
+      { key: 'max_auto_queue', label: 'Max Auto-Queue Per Cycle', placeholder: '50', type: 'number', description: 'Limit how many wanted tracks the scheduler queues per cycle' },
+      { key: 'requeue_cooldown_days', label: 'Re-queue Cooldown (days)', placeholder: '7', type: 'number', description: 'Wait this many days before retrying a previously failed track' },
+      { key: 'cache_ttl_hours', label: 'Cache TTL (hours)', placeholder: '24', type: 'number', description: 'How long provider search results are cached' },
+      { key: 'activity_retention_days', label: 'Activity Retention (days)', placeholder: '30', type: 'number', description: 'Delete activity log entries older than this' },
     ],
   },
 ];
@@ -160,7 +149,7 @@ export default function Settings() {
       {settingsSections.map((section) => (
         <SettingsSection key={section.title} title={section.title}>
           <div className="space-y-3">
-            {section.fields.map(({ key, label, placeholder, type }) => (
+            {section.fields.map(({ key, label, placeholder, type, description }) => (
               <div key={key}>
                 <label className="block text-xs text-zinc-400 mb-1">{label}</label>
                 <input
@@ -170,6 +159,7 @@ export default function Settings() {
                   placeholder={placeholder}
                   className="w-full bg-zinc-800 rounded-lg px-3 py-2.5 text-sm placeholder-zinc-600 outline-none focus:ring-2 focus:ring-zinc-600"
                 />
+                {description && <p className="text-[11px] text-zinc-600 mt-1">{description}</p>}
               </div>
             ))}
           </div>
@@ -199,15 +189,21 @@ export default function Settings() {
                     value={tier.format}
                     onChange={(e) => {
                       const updated = [...tiers];
-                      updated[i] = { ...tier, format: e.target.value, min_bitrate: e.target.value === 'flac' ? undefined : (tier.min_bitrate || 256) };
+                      const lossless = e.target.value === 'flac';
+                      updated[i] = { ...tier, format: e.target.value, min_bitrate: lossless ? undefined : (tier.min_bitrate || 256) };
                       setTiers(updated);
                     }}
                     className="bg-zinc-700 rounded px-2 py-0.5 text-[11px] outline-none"
                   >
                     <option value="flac">FLAC</option>
                     <option value="mp3">MP3</option>
+                    <option value="ogg">OGG</option>
+                    <option value="opus">Opus</option>
+                    <option value="aac">AAC</option>
+                    <option value="m4a">M4A</option>
+                    <option value="wav">WAV</option>
                   </select>
-                  {tier.format === 'mp3' && (
+                  {tier.format !== 'flac' && (
                     <select
                       value={tier.min_bitrate || 256}
                       onChange={(e) => {

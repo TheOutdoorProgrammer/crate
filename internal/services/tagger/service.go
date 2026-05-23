@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,6 +31,8 @@ func Tag(filePath string, meta TrackMeta) error {
 		return tagMP3(filePath, meta)
 	case ".flac":
 		return tagFLAC(filePath, meta)
+	case ".wav":
+		return tagWAV(filePath, meta)
 	default:
 		slog.Warn("tagger: unsupported format", "ext", ext)
 		return nil
@@ -114,6 +117,93 @@ func tagFLAC(filePath string, meta TrackMeta) error {
 	}
 
 	return f.Save(filePath)
+}
+
+func tagWAV(filePath string, meta TrackMeta) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("tagger: read wav: %w", err)
+	}
+	if len(data) < 12 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WAVE" {
+		return fmt.Errorf("tagger: not a valid WAV file")
+	}
+
+	// Strip existing LIST INFO chunk if present
+	cleaned := stripListInfo(data)
+
+	// Build new LIST INFO chunk
+	info := buildListInfo(map[string]string{
+		"INAM": meta.Title,
+		"IART": meta.Artist,
+		"IPRD": meta.Album,
+		"ITRK": fmt.Sprintf("%d", meta.TrackNumber),
+		"IKEY": fmt.Sprintf("%d", meta.DiscNumber),
+		"ICRD": fmt.Sprintf("%d", meta.Year),
+	})
+
+	// Append LIST chunk after existing sub-chunks
+	result := make([]byte, 0, len(cleaned)+len(info))
+	result = append(result, cleaned[:12]...)
+	result = append(result, cleaned[12:]...)
+	result = append(result, info...)
+
+	// Update RIFF size
+	riffSize := uint32(len(result) - 8)
+	result[4] = byte(riffSize)
+	result[5] = byte(riffSize >> 8)
+	result[6] = byte(riffSize >> 16)
+	result[7] = byte(riffSize >> 24)
+
+	return os.WriteFile(filePath, result, 0644)
+}
+
+func stripListInfo(data []byte) []byte {
+	pos := 12
+	var result []byte
+	result = append(result, data[:12]...)
+	for pos+8 <= len(data) {
+		chunkID := string(data[pos : pos+4])
+		chunkSize := int(data[pos+4]) | int(data[pos+5])<<8 | int(data[pos+6])<<16 | int(data[pos+7])<<24
+		totalSize := 8 + chunkSize
+		if chunkSize%2 != 0 {
+			totalSize++
+		}
+		if pos+totalSize > len(data) {
+			totalSize = len(data) - pos
+		}
+		if chunkID == "LIST" && pos+12 <= len(data) && string(data[pos+8:pos+12]) == "INFO" {
+			pos += totalSize
+			continue
+		}
+		result = append(result, data[pos:pos+totalSize]...)
+		pos += totalSize
+	}
+	return result
+}
+
+func buildListInfo(fields map[string]string) []byte {
+	keys := []string{"INAM", "IART", "IPRD", "ITRK", "IKEY", "ICRD"}
+	var payload []byte
+	payload = append(payload, []byte("INFO")...)
+	for _, key := range keys {
+		val := fields[key]
+		if val == "" || val == "0" {
+			continue
+		}
+		valBytes := append([]byte(val), 0)
+		size := len(valBytes)
+		payload = append(payload, []byte(key)...)
+		payload = append(payload, byte(size), byte(size>>8), byte(size>>16), byte(size>>24))
+		payload = append(payload, valBytes...)
+		if size%2 != 0 {
+			payload = append(payload, 0)
+		}
+	}
+	// LIST header: "LIST" + size (4 bytes LE)
+	listSize := len(payload)
+	header := []byte("LIST")
+	header = append(header, byte(listSize), byte(listSize>>8), byte(listSize>>16), byte(listSize>>24))
+	return append(header, payload...)
 }
 
 type coverData struct {

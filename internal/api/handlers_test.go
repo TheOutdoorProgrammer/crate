@@ -886,6 +886,62 @@ func TestSettingsCRUD(t *testing.T) {
 	}
 }
 
+func TestSettingsHiddenKeysNotReturned(t *testing.T) {
+	env := newTestEnv(t)
+
+	for _, key := range []string{"slskd_url", "slskd_api_key", "library_path", "scan_interval", "download_format_preference", "min_bitrate"} {
+		env.queries.SetSetting(key, "secret_value_"+key)
+	}
+
+	w := env.do("GET", "/api/settings", "")
+	settings := decode[map[string]string](t, w)
+	for _, key := range []string{"slskd_url", "slskd_api_key", "library_path", "scan_interval", "download_format_preference", "min_bitrate"} {
+		if _, ok := settings[key]; ok {
+			t.Errorf("hidden setting %q should not be returned by GET /api/settings", key)
+		}
+	}
+}
+
+func TestSettingsHiddenKeysNotWritable(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.do("PUT", "/api/settings", `{"slskd_api_key": "injected", "max_concurrent_slskd": "5"}`)
+
+	v, _ := env.queries.GetSetting("slskd_api_key")
+	if v == "injected" {
+		t.Error("hidden setting slskd_api_key should not be writable via API")
+	}
+
+	v, _ = env.queries.GetSetting("max_concurrent_slskd")
+	if v != "5" {
+		t.Errorf("expected max_concurrent_slskd '5', got %q", v)
+	}
+}
+
+func TestSettingsSensitiveRedacted(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.do("PUT", "/api/settings", `{"navidrome_password": "my_secret"}`)
+
+	w := env.do("GET", "/api/settings", "")
+	settings := decode[map[string]string](t, w)
+	if settings["navidrome_password"] != "••••••••" {
+		t.Errorf("expected redacted password, got %q", settings["navidrome_password"])
+	}
+}
+
+func TestSettingsSensitiveNotOverwrittenWithPlaceholder(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.do("PUT", "/api/settings", `{"navidrome_password": "real_password"}`)
+	env.do("PUT", "/api/settings", `{"navidrome_password": "••••••••"}`)
+
+	v, _ := env.queries.GetSetting("navidrome_password")
+	if v != "real_password" {
+		t.Errorf("expected password to remain 'real_password', got %q", v)
+	}
+}
+
 func TestStatusEndpoint(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)

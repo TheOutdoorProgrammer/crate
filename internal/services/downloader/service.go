@@ -18,6 +18,21 @@ import (
 
 const defaultMaxConcurrentSlskd = 10
 
+var supportedExts = map[string]bool{
+	".flac": true,
+	".mp3":  true,
+	".ogg":  true,
+	".opus": true,
+	".aac":  true,
+	".m4a":  true,
+	".wav":  true,
+}
+
+var losslessExts = map[string]bool{
+	".flac": true,
+	".wav":  true,
+}
+
 type Organizer interface {
 	Organize(track *models.Track) error
 }
@@ -480,26 +495,16 @@ func scoreAllFiles(results []slskd.SearchResult, track *models.Track, bl blackli
 
 			ext := strings.ToLower(filepath.Ext(f.Filename))
 			if ext == "" {
-				if strings.Contains(nameLower, ".flac") {
-					ext = ".flac"
-				} else if strings.Contains(nameLower, ".mp3") {
-					ext = ".mp3"
-				} else {
+				ext = inferExt(nameLower)
+				if ext == "" {
 					continue
 				}
 			}
-			if ext != ".flac" && ext != ".mp3" {
+			if !supportedExts[ext] {
 				continue
 			}
 
-			score := 0
-			if ext == ".flac" {
-				score += 100
-			} else if f.BitRate >= 320 {
-				score += 50
-			} else if f.BitRate >= 256 {
-				score += 30
-			}
+			score := formatScore(ext, f.BitRate)
 			if result.HasFreeUploadSlot {
 				score += 20
 			}
@@ -615,27 +620,16 @@ func pickBestFile(results []slskd.SearchResult, track *models.Track, bl blacklis
 
 			ext := strings.ToLower(filepath.Ext(f.Filename))
 			if ext == "" {
-				// slskd sometimes omits extension; infer from filename
-				if strings.Contains(nameLower, ".flac") {
-					ext = ".flac"
-				} else if strings.Contains(nameLower, ".mp3") {
-					ext = ".mp3"
-				} else {
+				ext = inferExt(nameLower)
+				if ext == "" {
 					continue
 				}
 			}
-			if ext != ".flac" && ext != ".mp3" {
+			if !supportedExts[ext] {
 				continue
 			}
 
-			score := 0
-			if ext == ".flac" {
-				score += 100
-			} else if f.BitRate >= 320 {
-				score += 50
-			} else if f.BitRate >= 256 {
-				score += 30
-			}
+			score := formatScore(ext, f.BitRate)
 			if result.HasFreeUploadSlot {
 				score += 20
 			}
@@ -649,4 +643,37 @@ func pickBestFile(results []slskd.SearchResult, track *models.Track, bl blacklis
 		}
 	}
 	return best
+}
+
+func inferExt(nameLower string) string {
+	for ext := range supportedExts {
+		if strings.Contains(nameLower, ext) {
+			return ext
+		}
+	}
+	return ""
+}
+
+func formatScore(ext string, bitRate int) int {
+	if losslessExts[ext] {
+		return 100
+	}
+	switch ext {
+	case ".ogg", ".opus", ".aac", ".m4a":
+		if bitRate >= 256 {
+			return 60
+		}
+		if bitRate >= 192 {
+			return 40
+		}
+		return 25
+	default:
+		if bitRate >= 320 {
+			return 50
+		}
+		if bitRate >= 256 {
+			return 30
+		}
+		return 10
+	}
 }

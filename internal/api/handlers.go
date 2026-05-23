@@ -876,7 +876,15 @@ func (s *Server) handleRelinkEntity(w http.ResponseWriter, r *http.Request) {
 
 var sensitiveSettings = map[string]bool{
 	"navidrome_password": true,
-	"slskd_api_key":     true,
+}
+
+var hiddenSettings = map[string]bool{
+	"slskd_url":                  true,
+	"slskd_api_key":              true,
+	"library_path":               true,
+	"scan_interval":              true,
+	"download_format_preference": true,
+	"min_bitrate":                true,
 }
 
 const redactedPlaceholder = "••••••••"
@@ -888,7 +896,9 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for k := range settings {
-		if sensitiveSettings[k] {
+		if hiddenSettings[k] {
+			delete(settings, k)
+		} else if sensitiveSettings[k] {
 			settings[k] = redactedPlaceholder
 		}
 	}
@@ -902,6 +912,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for k, v := range settings {
+		if hiddenSettings[k] {
+			continue
+		}
 		if sensitiveSettings[k] && v == redactedPlaceholder {
 			continue
 		}
