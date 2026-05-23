@@ -544,6 +544,14 @@ func (q *Queries) EnqueueDownload(trackID int64) error {
 	return err
 }
 
+func (q *Queries) ReenqueueDownload(trackID int64) error {
+	q.db.Exec(
+		`DELETE FROM download_queue WHERE track_id = ? AND status IN ('failed', 'complete')`,
+		trackID,
+	)
+	return q.EnqueueDownload(trackID)
+}
+
 func (q *Queries) EnqueueDownloadReturningID(trackID int64) (int64, error) {
 	result, err := q.db.Exec(
 		`INSERT INTO download_queue (track_id, status, created_at)

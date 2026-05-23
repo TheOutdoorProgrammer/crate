@@ -158,7 +158,7 @@ func (s *Service) queueWantedTracks() {
 	}
 	queued := 0
 	for _, t := range tracks {
-		if s.queries.EnqueueDownload(t.ID) == nil {
+		if s.queries.ReenqueueDownload(t.ID) == nil {
 			queued++
 		}
 	}
@@ -232,7 +232,7 @@ func (s *Service) scanForUpgrades() {
 			if err := s.queries.UpdateTrackStatus(t.ID, models.TrackStatusWanted); err != nil {
 				continue
 			}
-			if err := s.queries.EnqueueDownload(t.ID); err != nil {
+			if err := s.queries.ReenqueueDownload(t.ID); err != nil {
 				continue
 			}
 			queued++
