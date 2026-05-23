@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { formatSpeed } from '../lib/format';
+import DetailSheet, { DetailRow } from '../components/DetailSheet';
 import type { DownloadQueueItem, ActivityLog } from '../types/index';
 
 const ACTIVITY_PAGE_SIZE = 50;
@@ -9,6 +10,7 @@ const ACTIVITY_PAGE_SIZE = 50;
 export default function Downloads() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'queue' | 'activity'>('queue');
+  const [selected, setSelected] = useState<DownloadQueueItem | null>(null);
 
   const { data: downloads, isLoading } = useQuery({
     queryKey: ['downloads'],
@@ -168,22 +170,22 @@ export default function Downloads() {
 
           {active.length > 0 && (
             <Section title="Active">
-              {active.map((dl) => <DownloadRow key={dl.id} dl={dl} onRetry={retry.mutate} onDismiss={dismiss.mutate} />)}
+              {active.map((dl) => <DownloadRow key={dl.id} dl={dl} onRetry={retry.mutate} onDismiss={dismiss.mutate} onSelect={setSelected} />)}
             </Section>
           )}
           {pending.length > 0 && (
             <Section title="Pending" onClear={() => clearByStatus.mutate('pending')} clearLabel="Clear All">
-              {pending.map((dl) => <DownloadRow key={dl.id} dl={dl} onRetry={retry.mutate} onDismiss={dismiss.mutate} />)}
+              {pending.map((dl) => <DownloadRow key={dl.id} dl={dl} onRetry={retry.mutate} onDismiss={dismiss.mutate} onSelect={setSelected} />)}
             </Section>
           )}
           {failed.length > 0 && (
             <Section title="Failed" onClear={() => clearByStatus.mutate('failed')} clearLabel="Clear All">
-              {failed.map((dl) => <DownloadRow key={dl.id} dl={dl} onRetry={retry.mutate} onDismiss={dismiss.mutate} />)}
+              {failed.map((dl) => <DownloadRow key={dl.id} dl={dl} onRetry={retry.mutate} onDismiss={dismiss.mutate} onSelect={setSelected} />)}
             </Section>
           )}
           {complete.length > 0 && (
             <Section title="Complete" onClear={() => clearByStatus.mutate('complete')} clearLabel="Clear All">
-              {complete.map((dl) => <DownloadRow key={dl.id} dl={dl} onRetry={retry.mutate} onDismiss={dismiss.mutate} />)}
+              {complete.map((dl) => <DownloadRow key={dl.id} dl={dl} onRetry={retry.mutate} onDismiss={dismiss.mutate} onSelect={setSelected} />)}
             </Section>
           )}
         </>
@@ -198,6 +200,30 @@ export default function Downloads() {
           onLoadMore={loadMoreActivity}
         />
       )}
+
+      <DetailSheet
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        title={selected?.track?.title ?? `Download #${selected?.id}`}
+      >
+        {selected && (
+          <div className="space-y-0.5">
+            {selected.track?.artist_name && <DetailRow label="Artist">{selected.track.artist_name}</DetailRow>}
+            {selected.track?.album_title && <DetailRow label="Album">{selected.track.album_title}</DetailRow>}
+            <DetailRow label="Status"><StatusBadge status={selected.status} /></DetailRow>
+            <DetailRow label="Attempts">{selected.attempts}</DetailRow>
+            <DetailRow label="Queued">{new Date(selected.created_at).toLocaleString()}</DetailRow>
+            {selected.last_attempt && <DetailRow label="Last Attempt">{new Date(selected.last_attempt).toLocaleString()}</DetailRow>}
+            {selected.next_retry_at && <DetailRow label="Retries At">{new Date(selected.next_retry_at).toLocaleString()}</DetailRow>}
+            {selected.error && (
+              <div className="mt-3 p-3 bg-red-950/30 border border-red-900/50 rounded-lg">
+                <p className="text-[11px] text-red-400 uppercase tracking-wider mb-1">Error</p>
+                <p className="text-sm text-red-300 break-words">{selected.error}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </DetailSheet>
     </div>
   );
 }
@@ -273,13 +299,13 @@ function Section({ title, children, onClear, clearLabel }: { title: string; chil
   );
 }
 
-function DownloadRow({ dl, onRetry, onDismiss }: { dl: DownloadQueueItem; onRetry: (id: number) => void; onDismiss: (id: number) => void }) {
+function DownloadRow({ dl, onRetry, onDismiss, onSelect }: { dl: DownloadQueueItem; onRetry: (id: number) => void; onDismiss: (id: number) => void; onSelect: (dl: DownloadQueueItem) => void }) {
   const trackTitle = dl.track?.title ?? `Track #${dl.track_id}`;
   const artistName = dl.track?.artist_name;
   const albumTitle = dl.track?.album_title;
 
   return (
-    <div className="flex items-center gap-2.5 bg-zinc-800/40 rounded-lg px-3 py-2">
+    <div className="flex items-center gap-2.5 bg-zinc-800/40 rounded-lg px-3 py-2 cursor-pointer active:bg-zinc-800/70 transition-colors" onClick={() => onSelect(dl)}>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{trackTitle}</p>
         <p className="text-[11px] text-zinc-500 truncate">
@@ -293,7 +319,7 @@ function DownloadRow({ dl, onRetry, onDismiss }: { dl: DownloadQueueItem; onRetr
       <StatusBadge status={dl.status} />
       {dl.status === 'failed' && (
         <button
-          onClick={() => onRetry(dl.id)}
+          onClick={(e) => { e.stopPropagation(); onRetry(dl.id); }}
           className="px-2.5 py-1 bg-zinc-700 rounded text-xs active:bg-zinc-600 transition-colors shrink-0"
         >
           Retry
@@ -301,7 +327,7 @@ function DownloadRow({ dl, onRetry, onDismiss }: { dl: DownloadQueueItem; onRetr
       )}
       {(dl.status === 'failed' || dl.status === 'complete' || dl.status === 'pending') && (
         <button
-          onClick={() => onDismiss(dl.id)}
+          onClick={(e) => { e.stopPropagation(); onDismiss(dl.id); }}
           className="text-zinc-600 active:text-red-400 transition-colors shrink-0"
           title="Dismiss"
         >

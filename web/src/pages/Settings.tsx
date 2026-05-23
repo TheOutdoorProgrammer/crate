@@ -9,6 +9,12 @@ interface QualityTier {
   label: string;
 }
 
+function tierLabel(format: string, bitrate?: number): string {
+  const name = format.toUpperCase();
+  if (format === 'flac' || format === 'wav') return name;
+  return bitrate ? `${name} ${bitrate}kbps` : name;
+}
+
 const settingsSections = [
   {
     title: 'slskd',
@@ -189,8 +195,10 @@ export default function Settings() {
                     value={tier.format}
                     onChange={(e) => {
                       const updated = [...tiers];
-                      const lossless = e.target.value === 'flac';
-                      updated[i] = { ...tier, format: e.target.value, min_bitrate: lossless ? undefined : (tier.min_bitrate || 256) };
+                      const fmt = e.target.value;
+                      const lossless = fmt === 'flac' || fmt === 'wav';
+                      const bitrate = lossless ? undefined : (tier.min_bitrate || 256);
+                      updated[i] = { ...tier, format: fmt, min_bitrate: bitrate, label: tierLabel(fmt, bitrate) };
                       setTiers(updated);
                     }}
                     className="bg-zinc-700 rounded px-2 py-0.5 text-[11px] outline-none"
@@ -203,12 +211,13 @@ export default function Settings() {
                     <option value="m4a">M4A</option>
                     <option value="wav">WAV</option>
                   </select>
-                  {tier.format !== 'flac' && (
+                  {tier.format !== 'flac' && tier.format !== 'wav' && (
                     <select
                       value={tier.min_bitrate || 256}
                       onChange={(e) => {
                         const updated = [...tiers];
-                        updated[i] = { ...tier, min_bitrate: Number(e.target.value) };
+                        const bitrate = Number(e.target.value);
+                        updated[i] = { ...tier, min_bitrate: bitrate, label: tierLabel(tier.format, bitrate) };
                         setTiers(updated);
                       }}
                       className="bg-zinc-700 rounded px-2 py-0.5 text-[11px] outline-none"

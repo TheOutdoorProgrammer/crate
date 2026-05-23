@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { useToast } from '../components/Toast';
 import { formatDuration, formatTotalDuration, formatFileSize } from '../lib/format';
 import FilterBar from '../components/FilterBar';
+import DetailSheet, { DetailRow } from '../components/DetailSheet';
 import ProviderBadge from '../components/ProviderBadge';
 import ProgressBar from '../components/ProgressBar';
 import type { ManualSearchResult, Track } from '../types/index';
@@ -67,6 +68,7 @@ export default function AlbumDetail() {
   });
 
   const [trackFilter, setTrackFilter] = useState('');
+  const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [manualSearchTrackId, setManualSearchTrackId] = useState<number | null>(null);
   const [manualResults, setManualResults] = useState<ManualSearchResult[]>([]);
   const [manualSearching, setManualSearching] = useState(false);
@@ -228,7 +230,7 @@ export default function AlbumDetail() {
               const isManualOpen = manualSearchTrackId === track.id;
               return (
                 <div key={track.id}>
-                  <div className="flex items-center gap-2.5 px-2.5 py-2 border-b border-zinc-800/50 last:border-0">
+                  <div className="flex items-center gap-2.5 px-2.5 py-2 border-b border-zinc-800/50 last:border-0 cursor-pointer active:bg-zinc-800/50 transition-colors" onClick={() => setSelectedTrack(track)}>
                     <span className="text-[11px] text-zinc-600 w-5 text-right shrink-0 tabular-nums">
                       {track.track_number}
                     </span>
@@ -253,7 +255,7 @@ export default function AlbumDetail() {
                     {track.status === 'wanted' && (
                       <>
                         <button
-                          onClick={() => queueTrack.mutate(track.id)}
+                          onClick={(e) => { e.stopPropagation(); queueTrack.mutate(track.id); }}
                           disabled={isQueued || isSearching}
                           className={`shrink-0 transition-colors ${
                             isQueued || isSearching ? 'opacity-30 cursor-not-allowed' : 'text-zinc-500 active:text-white'
@@ -265,7 +267,7 @@ export default function AlbumDetail() {
                           </svg>
                         </button>
                         <button
-                          onClick={() => startManualSearch(track.id)}
+                          onClick={(e) => { e.stopPropagation(); startManualSearch(track.id); }}
                           disabled={manualSearching && isManualOpen}
                           className={`shrink-0 transition-colors ${
                             isManualOpen ? 'text-blue-400' : 'text-zinc-500 active:text-white'
@@ -279,7 +281,7 @@ export default function AlbumDetail() {
                       </>
                     )}
                     <button
-                      onClick={() => unwatchTrack.mutate(track.id)}
+                      onClick={(e) => { e.stopPropagation(); unwatchTrack.mutate(track.id); }}
                       className="ml-1 text-zinc-600 active:text-red-400 transition-colors shrink-0"
                       title="Unwatch track"
                     >
@@ -343,6 +345,28 @@ export default function AlbumDetail() {
           </div>
         </div>
       )}
+
+      <DetailSheet
+        open={!!selectedTrack}
+        onClose={() => setSelectedTrack(null)}
+        title={selectedTrack?.title ?? ''}
+      >
+        {selectedTrack && (
+          <div className="space-y-0.5">
+            <DetailRow label="Track">{selectedTrack.disc_number > 1 ? `Disc ${selectedTrack.disc_number}, ` : ''}#{selectedTrack.track_number}</DetailRow>
+            <DetailRow label="Duration">{formatDuration(selectedTrack.duration_ms)}</DetailRow>
+            <DetailRow label="Status"><StatusBadge status={selectedTrack.status} /></DetailRow>
+            {selectedTrack.download_format && (
+              <DetailRow label="Format">
+                {selectedTrack.download_format.toUpperCase()}
+                {selectedTrack.download_bitrate ? ` ${selectedTrack.download_bitrate} kbps` : ''}
+              </DetailRow>
+            )}
+            {selectedTrack.downloaded_from && <DetailRow label="Source">{selectedTrack.downloaded_from}</DetailRow>}
+            {selectedTrack.file_path && <DetailRow label="Path">{selectedTrack.file_path}</DetailRow>}
+          </div>
+        )}
+      </DetailSheet>
     </div>
   );
 }
