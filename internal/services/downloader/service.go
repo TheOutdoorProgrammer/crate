@@ -112,6 +112,11 @@ func (s *Service) tick(ctx context.Context) {
 	retryable, err := s.queries.ListRetryableDownloads()
 	if err == nil {
 		for _, d := range retryable {
+			if d.Attempts >= 4 && d.Source == "scheduler" {
+				slog.Info("downloader: removing exhausted scheduler download", "download_id", d.ID)
+				s.queries.DeleteDownload(d.ID)
+				continue
+			}
 			slog.Info("downloader: retrying", "download_id", d.ID, "attempts", d.Attempts)
 			s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusPending, nil, d.Error)
 		}
@@ -135,6 +140,11 @@ func (s *Service) tick(ctx context.Context) {
 			break
 		}
 		if d.Attempts >= 4 {
+			if d.Source == "scheduler" {
+				slog.Info("downloader: removing exhausted scheduler download", "download_id", d.ID)
+				s.queries.DeleteDownload(d.ID)
+				continue
+			}
 			reason := "exceeded maximum retry attempts"
 			if d.Error != nil && *d.Error != "" {
 				reason += ": " + *d.Error
@@ -370,9 +380,13 @@ func (s *Service) failWithRetry(d models.DownloadQueueItem, errMsg string) error
 	backoff := retryDelay(d.Attempts)
 	// 5m + 15m + 30m + 1h = 1h50m cumulative at attempt 4; stop after ~2h
 	if d.Attempts >= 4 {
+		_ = s.queries.UpdateTrackStatus(d.TrackID, models.TrackStatusWanted)
+		if d.Source == "scheduler" {
+			slog.Info("downloader: removing exhausted scheduler download", "download_id", d.ID)
+			return s.queries.DeleteDownload(d.ID)
+		}
 		slog.Warn("downloader: giving up after 2h of retries", "download_id", d.ID, "attempts", d.Attempts)
 		errFinal := errMsg + " (giving up after 2h)"
-		_ = s.queries.UpdateTrackStatus(d.TrackID, models.TrackStatusWanted)
 		return s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusFailed, nil, &errFinal)
 	}
 	retryAt := time.Now().UTC().Add(backoff).Format(time.RFC3339)

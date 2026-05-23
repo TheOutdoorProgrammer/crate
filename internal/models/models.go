@@ -104,6 +104,7 @@ type DownloadQueueItem struct {
 	LastAttempt   *string        `json:"last_attempt,omitempty" db:"last_attempt"`
 	Error         *string        `json:"error,omitempty" db:"error"`
 	NextRetryAt   *string        `json:"next_retry_at,omitempty" db:"next_retry_at"`
+	Source        string         `json:"source" db:"source"`
 	CreatedAt     string         `json:"created_at" db:"created_at"`
 	Track         *Track         `json:"track,omitempty"`
 }

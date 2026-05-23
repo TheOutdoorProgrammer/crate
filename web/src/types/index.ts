@@ -60,6 +60,7 @@ export interface DownloadQueueItem {
   last_attempt?: string;
   error?: string;
   next_retry_at?: string;
+  source: string;
   created_at: string;
   track?: Track;
 }

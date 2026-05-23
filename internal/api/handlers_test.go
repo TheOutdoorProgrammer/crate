@@ -1672,3 +1672,125 @@ func TestLargeLibraryEnqueueBatch(t *testing.T) {
 		t.Errorf("expected 0 queued on duplicate batch, got %d", queued)
 	}
 }
+
+func TestUserQueuedDownloadHasSourceUser(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	env.do("POST", fmt.Sprintf("/api/tracks/%d/queue", tracks[0].ID), "")
+
+	downloads, _ := env.queries.ListDownloads("")
+	if len(downloads) != 1 {
+		t.Fatalf("expected 1 download, got %d", len(downloads))
+	}
+	if downloads[0].Source != "user" {
+		t.Errorf("expected source 'user', got %q", downloads[0].Source)
+	}
+}
+
+func TestQueueAllWantedSetsSourceUser(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+	env.do("POST", "/api/downloads/queue", "")
+
+	downloads, _ := env.queries.ListDownloads("")
+	for _, d := range downloads {
+		if d.Source != "user" {
+			t.Errorf("download %d: expected source 'user', got %q", d.ID, d.Source)
+		}
+	}
+}
+
+func TestDownloadsAPIReturnsSource(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+	env.do("POST", "/api/downloads/queue", "")
+
+	w := env.do("GET", "/api/downloads", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	downloads := decode[[]models.DownloadQueueItem](t, w)
+	for _, d := range downloads {
+		if d.Source != "user" {
+			t.Errorf("download %d: expected source 'user' in API response, got %q", d.ID, d.Source)
+		}
+	}
+}
+
+func TestSchedulerSourcedDownloadAutoDeleted(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	env.queries.ReenqueueDownload(tracks[0].ID)
+
+	downloads, _ := env.queries.ListDownloads("")
+	if len(downloads) != 1 {
+		t.Fatalf("expected 1 download, got %d", len(downloads))
+	}
+	if downloads[0].Source != "scheduler" {
+		t.Fatalf("expected source 'scheduler', got %q", downloads[0].Source)
+	}
+
+	errMsg := "no results found"
+	for i := 0; i < 4; i++ {
+		env.queries.ScheduleRetry(downloads[0].ID, "2000-01-01T00:00:00Z", errMsg)
+	}
+
+	updated, _ := env.queries.ListDownloads("")
+	if len(updated) != 1 {
+		t.Fatalf("expected download to still exist before tick, got %d", len(updated))
+	}
+	if updated[0].Attempts != 4 {
+		t.Fatalf("expected 4 attempts, got %d", updated[0].Attempts)
+	}
+
+	retryable, _ := env.queries.ListRetryableDownloads()
+	if len(retryable) != 1 {
+		t.Fatalf("expected 1 retryable, got %d", len(retryable))
+	}
+	if retryable[0].Source != "scheduler" {
+		t.Errorf("retryable download source: expected 'scheduler', got %q", retryable[0].Source)
+	}
+}
+
+func TestUserSourcedDownloadKeptAsFailed(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	env.do("POST", fmt.Sprintf("/api/tracks/%d/queue", tracks[0].ID), "")
+
+	downloads, _ := env.queries.ListDownloads("")
+	if downloads[0].Source != "user" {
+		t.Fatalf("expected source 'user', got %q", downloads[0].Source)
+	}
+
+	errMsg := "transfer rejected"
+	for i := 0; i < 4; i++ {
+		env.queries.ScheduleRetry(downloads[0].ID, "2000-01-01T00:00:00Z", errMsg)
+	}
+
+	updated, _ := env.queries.ListDownloads("")
+	if len(updated) != 1 {
+		t.Fatalf("expected download to still exist, got %d", len(updated))
+	}
+	if updated[0].Attempts != 4 {
+		t.Fatalf("expected 4 attempts, got %d", updated[0].Attempts)
+	}
+	if updated[0].Source != "user" {
+		t.Errorf("source should still be 'user', got %q", updated[0].Source)
+	}
+}
