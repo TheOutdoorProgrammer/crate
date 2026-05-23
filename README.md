@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web/public/favicon.svg" width="96" alt="Crate logo">
+  <img src="web/public/cratelogo.png" width="128" alt="Crate logo">
 </p>
 
 <h1 align="center">Crate</h1>

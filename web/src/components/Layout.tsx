@@ -33,18 +33,6 @@ function IconSettings({ className }: { className?: string }) {
   );
 }
 
-function CrateLogo({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M19 28 A 13 13 0 0 1 45 28" />
-      <circle cx="32" cy="28" r="2.75" fill="currentColor" stroke="none" />
-      <rect x="6" y="28" width="52" height="28" rx="2" />
-      <line x1="6" y1="37" x2="58" y2="37" />
-      <line x1="6" y1="46" x2="58" y2="46" />
-    </svg>
-  );
-}
-
 const navItems = [
   { to: '/', label: 'Library', Icon: IconLibrary },
   { to: '/search', label: 'Search', Icon: IconSearch },
@@ -81,7 +69,7 @@ export default function Layout() {
       {/* Desktop sidebar */}
       <nav className="hidden md:flex fixed left-0 top-0 h-full w-56 bg-zinc-900 border-r border-zinc-800 flex-col">
         <div className="p-6 flex items-center gap-3">
-          <CrateLogo className="w-9 h-9 text-amber-500 shrink-0" />
+          <img src="/cratelogo.png" alt="Crate" className="w-10 h-10 shrink-0" />
           <div>
             <h1 className="text-xl font-bold tracking-tight leading-none">Crate</h1>
             <p className="text-[11px] text-zinc-500 mt-1 tracking-wide uppercase">Dig deeper</p>
