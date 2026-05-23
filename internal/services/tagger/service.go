@@ -154,7 +154,7 @@ func tagWAV(filePath string, meta TrackMeta) error {
 	result[6] = byte(riffSize >> 16)
 	result[7] = byte(riffSize >> 24)
 
-	return os.WriteFile(filePath, result, 0644)
+	return os.WriteFile(filePath, result, 0600) // #nosec G703 -- filePath is from internal organizer, not user input
 }
 
 func stripListInfo(data []byte) []byte {

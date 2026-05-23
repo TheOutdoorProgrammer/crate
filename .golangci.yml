@@ -4,3 +4,6 @@ linters:
   default: standard
   disable:
     - errcheck
+  exclusions:
+    paths:
+      - web/node_modules
