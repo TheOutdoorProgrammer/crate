@@ -1,6 +1,16 @@
-# Crate
+<p align="center">
+  <img src="web/public/favicon.svg" width="96" alt="Crate logo">
+</p>
 
-Self-hosted music manager. Search for artists via pluggable providers (MusicBrainz, Deezer, or custom gRPC), watch their discographies, and automatically download via [slskd](https://github.com/slskd/slskd) (Soulseek). Mobile-first UI.
+<h1 align="center">Crate</h1>
+
+<p align="center">
+  <em>Dig deeper.</em>
+</p>
+
+<p align="center">
+  Self-hosted music manager. Search for artists via pluggable providers (MusicBrainz, Deezer, or custom gRPC), watch their discographies, and automatically download via <a href="https://github.com/slskd/slskd">slskd</a> (Soulseek). Mobile-first UI.
+</p>
 
 ## Quick Start
 
