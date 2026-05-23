@@ -9,7 +9,17 @@
 </p>
 
 <p align="center">
-  Self-hosted music manager. Search for artists via pluggable providers (MusicBrainz, Deezer, or custom gRPC), watch their discographies, and automatically download via <a href="https://github.com/slskd/slskd">slskd</a> (Soulseek). Mobile-first UI.
+  Self-hosted music manager. Search for artists via pluggable providers (MusicBrainz, Deezer, or custom gRPC), watch their discographies, and automatically download via <a href="https://github.com/slskd/slskd">slskd</a> (Soulseek). Optional <a href="https://www.navidrome.org/">Navidrome</a> integration triggers library scans so new music appears immediately. Mobile-first UI.
+</p>
+
+<p align="center">
+  <img src="screenshots/library.jpeg" width="180" alt="Library">
+  &nbsp;
+  <img src="screenshots/artist.jpeg" width="180" alt="Artist detail">
+  &nbsp;
+  <img src="screenshots/album.jpeg" width="180" alt="Album detail">
+  &nbsp;
+  <img src="screenshots/downloads.jpeg" width="180" alt="Downloads">
 </p>
 
 ## Quick Start
