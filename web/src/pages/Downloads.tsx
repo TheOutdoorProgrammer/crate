@@ -211,7 +211,7 @@ export default function Downloads() {
             {selected.track?.artist_name && <DetailRow label="Artist">{selected.track.artist_name}</DetailRow>}
             {selected.track?.album_title && <DetailRow label="Album">{selected.track.album_title}</DetailRow>}
             <DetailRow label="Status"><StatusBadge status={selected.status} /></DetailRow>
-            <DetailRow label="Attempts">{selected.attempts}</DetailRow>
+            <DetailRow label="Attempts">{selected.attempts} / 4{selected.attempts < 4 && selected.status !== 'complete' ? ` (${4 - selected.attempts} left)` : ''}</DetailRow>
             <DetailRow label="Queued">{new Date(selected.created_at).toLocaleString()}</DetailRow>
             {selected.last_attempt && <DetailRow label="Last Attempt">{new Date(selected.last_attempt).toLocaleString()}</DetailRow>}
             {selected.next_retry_at && <DetailRow label="Retries At">{new Date(selected.next_retry_at).toLocaleString()}</DetailRow>}

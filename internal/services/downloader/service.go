@@ -113,7 +113,7 @@ func (s *Service) tick(ctx context.Context) {
 	if err == nil {
 		for _, d := range retryable {
 			slog.Info("downloader: retrying", "download_id", d.ID, "attempts", d.Attempts)
-			s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusPending, nil, nil)
+			s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusPending, nil, d.Error)
 		}
 	}
 
@@ -135,8 +135,11 @@ func (s *Service) tick(ctx context.Context) {
 			break
 		}
 		if d.Attempts >= 4 {
-			errMsg := "exceeded maximum retry attempts"
-			s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusFailed, nil, &errMsg)
+			reason := "exceeded maximum retry attempts"
+			if d.Error != nil && *d.Error != "" {
+				reason += ": " + *d.Error
+			}
+			s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusFailed, nil, &reason)
 			continue
 		}
 		if err := s.process(ctx, d); err != nil {
