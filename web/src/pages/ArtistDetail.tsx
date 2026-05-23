@@ -27,7 +27,7 @@ export default function ArtistDetail() {
       const a = query.state.data;
       if (!a?.albums) return false;
       const hasActive = a.albums.some((al: Album) =>
-        al.tracks?.some((t: Track) => t.status === 'downloading' || t.status === 'searching')
+        al.tracks?.some((t: Track) => t.status === 'downloading')
       );
       return hasActive ? 10_000 : false;
     },
