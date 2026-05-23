@@ -27,14 +27,14 @@ func startTestServer(t *testing.T, fakeURL string) pb.MusicProviderClient {
 		limiter: rate.NewLimiter(rate.Inf, 1),
 		baseURL: fakeURL,
 	})
-	go s.Serve(lis)
+	go func() { _ = s.Serve(lis) }()
 	t.Cleanup(s.Stop)
 
 	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	return pb.NewMusicProviderClient(conn)
 }
 
@@ -42,7 +42,7 @@ func newFakeDeezerAPI() *httptest.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/search/artist", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{"id": 1000, "name": "Radiohead", "picture_medium": "http://img/rh.jpg", "nb_album": 9, "nb_fan": 5000000},
 				{"id": 1001, "name": "Radiohead Tribute", "picture_medium": "", "nb_album": 1, "nb_fan": 200},
@@ -51,13 +51,13 @@ func newFakeDeezerAPI() *httptest.Server {
 	})
 
 	mux.HandleFunc("/artist/1000", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": 1000, "name": "Radiohead", "picture_medium": "http://img/rh.jpg", "nb_fan": 5000000,
 		})
 	})
 
 	mux.HandleFunc("/artist/1000/albums", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{"id": 2000, "title": "OK Computer", "cover_medium": "http://img/okc.jpg", "release_date": "1997-06-16", "record_type": "album"},
 				{"id": 2001, "title": "Kid A", "cover_medium": "http://img/kida.jpg", "release_date": "2000-10-02", "record_type": "album"},
@@ -66,7 +66,7 @@ func newFakeDeezerAPI() *httptest.Server {
 	})
 
 	mux.HandleFunc("/album/2000", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": 2000, "title": "OK Computer", "cover_medium": "http://img/okc.jpg", "release_date": "1997-06-16",
 			"artist": map[string]any{"name": "Radiohead"},
 			"tracks": map[string]any{
@@ -127,7 +127,7 @@ func TestDeezerSearchArtists(t *testing.T) {
 func TestDeezerSearchDeduplicates(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/search/artist", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{"id": 1000, "name": "Radiohead", "nb_fan": 100},
 				{"id": 1000, "name": "Radiohead", "nb_fan": 100},

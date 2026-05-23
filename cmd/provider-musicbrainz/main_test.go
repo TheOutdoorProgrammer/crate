@@ -28,14 +28,14 @@ func startTestServer(t *testing.T, fakeURL string) pb.MusicProviderClient {
 		userAgent: "CrateTest/1.0",
 		baseURL:   fakeURL,
 	})
-	go s.Serve(lis)
+	go func() { _ = s.Serve(lis) }()
 	t.Cleanup(s.Stop)
 
 	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	return pb.NewMusicProviderClient(conn)
 }
 
@@ -300,7 +300,7 @@ func TestMusicBrainzUserAgent(t *testing.T) {
 	defer fake.Close()
 	client := startTestServer(t, fake.URL)
 
-	client.SearchArtists(context.Background(), &pb.SearchRequest{Query: "test"})
+	_, _ = client.SearchArtists(context.Background(), &pb.SearchRequest{Query: "test"})
 	if receivedUA != "CrateTest/1.0" {
 		t.Errorf("expected User-Agent 'CrateTest/1.0', got %q", receivedUA)
 	}

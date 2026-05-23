@@ -49,7 +49,7 @@ jobs:
         run: mkdir -p cmd/crate/dist && touch cmd/crate/dist/.keep
 
       - name: Run gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest && gosec -conf .gosec.json ./...
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest && gosec -exclude=G103,G104,G109,G115,G204,G301,G304,G401,G501 ./...
 
       - uses: actions/setup-node@v4
         with:

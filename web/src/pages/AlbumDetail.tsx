@@ -38,7 +38,7 @@ export default function AlbumDetail() {
     mutationFn: () => api.unwatchAlbum(Number(id)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['artists'] });
-      window.history.length > 1 ? navigate(-1) : navigate('/');
+      if (window.history.length > 1) { navigate(-1); } else { navigate('/'); }
     },
   });
 
