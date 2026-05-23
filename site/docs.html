@@ -92,6 +92,46 @@
       margin-left: 0.125rem;
     }
 
+    /* Hamburger */
+    .hamburger {
+      display: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0.5rem;
+      color: var(--text-secondary);
+    }
+    .hamburger:hover { color: var(--text); }
+    .hamburger svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+
+    .mobile-menu {
+      display: none;
+      position: fixed;
+      top: 3.5rem;
+      left: 0;
+      right: 0;
+      z-index: 99;
+      background: rgba(9, 9, 11, 0.95);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1.5rem 1rem;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .mobile-menu.open { display: flex; }
+
+    .mobile-menu a {
+      display: block;
+      padding: 0.625rem 0;
+      color: var(--text-secondary);
+      font-size: 0.9375rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .mobile-menu a:last-child { border-bottom: none; }
+    .mobile-menu a:hover { color: var(--text); }
+
     /* Layout */
     .docs-layout {
       display: flex;
@@ -314,7 +354,8 @@
       .sidebar { display: none; }
       .docs-content { padding: 2rem 1.5rem 4rem; }
       .docs-content h1 { font-size: 1.75rem; }
-      .nav-links .nav-link-text { display: none; }
+      .nav-links { display: none; }
+      .hamburger { display: block; }
     }
   </style>
 </head>
@@ -334,7 +375,18 @@
         <span class="star-count" id="star-count"></span>
       </a>
     </div>
+    <button class="hamburger" onclick="document.getElementById('mobile-menu').classList.toggle('open')" aria-label="Menu">
+      <svg viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+    </button>
   </nav>
+
+  <div class="mobile-menu" id="mobile-menu">
+    <a href="/">Home</a>
+    <a href="/docs.html">Docs</a>
+    <a href="https://github.com/TheOutdoorProgrammer/crate">
+      GitHub <span class="star-count" id="star-count-mobile"></span>
+    </a>
+  </div>
 
   <div class="docs-layout">
 
@@ -920,7 +972,9 @@
           var c = d.stargazers_count;
           var t = c >= 1000 ? (c / 1000).toFixed(1) + 'k' : c;
           var el = document.getElementById('star-count');
+          var elM = document.getElementById('star-count-mobile');
           if (el) el.textContent = '★ ' + t;
+          if (elM) elM.textContent = '★ ' + t;
         }
       })
       .catch(function(){});
