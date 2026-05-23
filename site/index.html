@@ -87,6 +87,57 @@
     .btn-github:hover { color: var(--text); border-color: var(--text-muted); }
     .btn-github svg { width: 16px; height: 16px; fill: currentColor; }
 
+    .star-count {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0.25rem;
+      padding: 0.0625rem 0.375rem;
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      margin-left: 0.125rem;
+    }
+
+    /* Hamburger */
+    .hamburger {
+      display: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0.5rem;
+      color: var(--text-secondary);
+    }
+    .hamburger:hover { color: var(--text); }
+    .hamburger svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+
+    /* Mobile dropdown */
+    .mobile-menu {
+      display: none;
+      position: fixed;
+      top: 3.5rem;
+      left: 0;
+      right: 0;
+      z-index: 99;
+      background: rgba(9, 9, 11, 0.95);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1.5rem 1rem;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .mobile-menu.open { display: flex; }
+
+    .mobile-menu a {
+      display: block;
+      padding: 0.625rem 0;
+      color: var(--text-secondary);
+      font-size: 0.9375rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .mobile-menu a:last-child { border-bottom: none; }
+    .mobile-menu a:hover { color: var(--text); }
+
     /* Hero */
     .hero {
       padding: 8rem 1.5rem 4rem;
@@ -308,6 +359,8 @@
       margin: 0 auto;
     }
 
+    pre.code-block { margin: 0; white-space: pre; }
+
     .code-block {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -377,6 +430,8 @@
       .step-connector { display: none; }
       .screenshot { width: 160px; }
       .screenshots-inner { justify-content: flex-start; padding: 0 0.5rem; }
+      .nav-links { display: none; }
+      .hamburger { display: block; }
     }
   </style>
 </head>
@@ -388,15 +443,28 @@
       <span>Crate</span>
     </a>
     <div class="nav-links">
-      <a href="#features" class="nav-link-text">Features</a>
-      <a href="#quickstart" class="nav-link-text">Quick Start</a>
+      <a href="#features">Features</a>
+      <a href="#quickstart">Quick Start</a>
       <a href="/docs.html">Docs</a>
       <a href="https://github.com/TheOutdoorProgrammer/crate" class="btn-github">
         <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
         GitHub
+        <span class="star-count" id="star-count"></span>
       </a>
     </div>
+    <button class="hamburger" onclick="document.getElementById('mobile-menu').classList.toggle('open')" aria-label="Menu">
+      <svg viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+    </button>
   </nav>
+
+  <div class="mobile-menu" id="mobile-menu">
+    <a href="#features" onclick="document.getElementById('mobile-menu').classList.remove('open')">Features</a>
+    <a href="#quickstart" onclick="document.getElementById('mobile-menu').classList.remove('open')">Quick Start</a>
+    <a href="/docs.html">Docs</a>
+    <a href="https://github.com/TheOutdoorProgrammer/crate">
+      GitHub <span class="star-count" id="star-count-mobile"></span>
+    </a>
+  </div>
 
   <section class="hero">
     <img src="cratelogo.png" alt="Crate" class="hero-logo">
@@ -524,7 +592,7 @@
     <h2 class="section-title">Up and running in 60 seconds</h2>
     <p class="section-subtitle">One docker-compose file is all you need.</p>
 
-    <div class="code-block"><span class="comment"># docker-compose.yml</span>
+    <pre class="code-block"><code><span class="comment"># docker-compose.yml</span>
 <span class="cmd">services:</span>
   <span class="cmd">crate:</span>
     <span class="cmd">image:</span> ghcr.io/theoutdoorprogrammer/crate:latest
@@ -555,7 +623,7 @@
       - SLSKD_API_KEY=<span class="val">your_api_key</span>
       - SLSKD_SOULSEEK_USERNAME=<span class="val">your_username</span>
       - SLSKD_SOULSEEK_PASSWORD=<span class="val">your_password</span>
-    <span class="cmd">restart:</span> unless-stopped</div>
+    <span class="cmd">restart:</span> unless-stopped</code></pre>
 
     <div style="text-align: center; margin-top: 2rem;">
       <p style="color: var(--text-secondary); margin-bottom: 0.5rem; font-size: 0.9375rem;">Then run:</p>
@@ -574,6 +642,22 @@
     </div>
     <p>Self-hosted. Open source. Built for collectors.</p>
   </footer>
+
+  <script>
+    fetch('https://api.github.com/repos/TheOutdoorProgrammer/crate')
+      .then(r => r.json())
+      .then(d => {
+        if (d.stargazers_count !== undefined) {
+          var c = d.stargazers_count;
+          var t = c >= 1000 ? (c / 1000).toFixed(1) + 'k' : c;
+          var el = document.getElementById('star-count');
+          var elM = document.getElementById('star-count-mobile');
+          if (el) el.textContent = '★ ' + t;
+          if (elM) elM.textContent = '★ ' + t;
+        }
+      })
+      .catch(function(){});
+  </script>
 
 </body>
 </html>
