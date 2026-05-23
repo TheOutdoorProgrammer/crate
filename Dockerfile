@@ -7,7 +7,7 @@ RUN CGO_ENABLED=0 go build -o /crate ./cmd/crate/ && \
     CGO_ENABLED=0 go build -o /provider-musicbrainz ./cmd/provider-musicbrainz/ && \
     CGO_ENABLED=0 go build -o /provider-deezer ./cmd/provider-deezer/
 
-FROM alpine:3.21
+FROM alpine:3.23
 ENV CRATE_DB_PATH=/app/data/crate.db
 ENV CRATE_CACHE_PATH=/app/data/cache.db
 ENV CRATE_ACTIVITY_PATH=/app/data/activity.db

@@ -18,13 +18,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Create frontend dist placeholder
+        run: mkdir -p cmd/crate/dist && touch cmd/crate/dist/.keep
+
       - uses: golangci/golangci-lint-action@v7
         with:
           version: latest
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -42,14 +45,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Create frontend dist placeholder
+        run: mkdir -p cmd/crate/dist && touch cmd/crate/dist/.keep
+
       - name: Run gosec
-        uses: securego/gosec@master
-        with:
-          args: ./...
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest && gosec ./...
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -72,7 +76,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
 
