@@ -65,16 +65,19 @@ func newFakeDeezerAPI() *httptest.Server {
 		})
 	})
 
+	mux.HandleFunc("/album/2000/tracks", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": 3000, "title": "Airbag", "track_position": 1, "disk_number": 1, "duration": 284},
+				{"id": 3001, "title": "Paranoid Android", "track_position": 2, "disk_number": 1, "duration": 383},
+			},
+		})
+	})
+
 	mux.HandleFunc("/album/2000", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": 2000, "title": "OK Computer", "cover_medium": "http://img/okc.jpg", "release_date": "1997-06-16",
 			"artist": map[string]any{"name": "Radiohead"},
-			"tracks": map[string]any{
-				"data": []map[string]any{
-					{"id": 3000, "title": "Airbag", "track_position": 1, "disk_number": 1, "duration": 284},
-					{"id": 3001, "title": "Paranoid Android", "track_position": 2, "disk_number": 1, "duration": 383},
-				},
-			},
 		})
 	})
 

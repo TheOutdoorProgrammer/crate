@@ -186,7 +186,7 @@ func (s *server) GetArtistAlbums(ctx context.Context, req *pb.EntityRequest) (*p
 }
 
 func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.AlbumDetail, error) {
-	var resp struct {
+	var albumResp struct {
 		ID          int64  `json:"id"`
 		Title       string `json:"title"`
 		CoverMedium string `json:"cover_medium"`
@@ -194,24 +194,28 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 		Artist      struct {
 			Name string `json:"name"`
 		} `json:"artist"`
-		Tracks struct {
-			Data []struct {
-				ID            int64  `json:"id"`
-				Title         string `json:"title"`
-				TrackPosition int    `json:"track_position"`
-				DiskNumber    int    `json:"disk_number"`
-				Duration      int    `json:"duration"`
-			} `json:"data"`
-		} `json:"tracks"`
 	}
 
-	if err := s.get(ctx, "/album/"+req.Id, &resp); err != nil {
+	if err := s.get(ctx, "/album/"+req.Id, &albumResp); err != nil {
 		return nil, err
 	}
 
-	year := parseYear(resp.ReleaseDate)
+	var tracksResp struct {
+		Data []struct {
+			ID            int64  `json:"id"`
+			Title         string `json:"title"`
+			TrackPosition int    `json:"track_position"`
+			DiskNumber    int    `json:"disk_number"`
+			Duration      int    `json:"duration"`
+		} `json:"data"`
+	}
+	if err := s.get(ctx, "/album/"+req.Id+"/tracks", &tracksResp); err != nil {
+		return nil, err
+	}
+
+	year := parseYear(albumResp.ReleaseDate)
 	var tracks []*pb.TrackInfo
-	for _, t := range resp.Tracks.Data {
+	for _, t := range tracksResp.Data {
 		tracks = append(tracks, &pb.TrackInfo{
 			Id:          strconv.FormatInt(t.ID, 10),
 			Title:       t.Title,
@@ -223,11 +227,11 @@ func (s *server) GetAlbum(ctx context.Context, req *pb.EntityRequest) (*pb.Album
 	}
 
 	return &pb.AlbumDetail{
-		Id:         strconv.FormatInt(resp.ID, 10),
-		Title:      resp.Title,
-		CoverUrl:   resp.CoverMedium,
+		Id:         strconv.FormatInt(albumResp.ID, 10),
+		Title:      albumResp.Title,
+		CoverUrl:   albumResp.CoverMedium,
 		Year:       int32(year),
-		ArtistName: resp.Artist.Name,
+		ArtistName: albumResp.Artist.Name,
 		Tracks:     tracks,
 	}, nil
 }
