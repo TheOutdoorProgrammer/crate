@@ -679,7 +679,7 @@ func (q *Queries) DeleteDownloadsByStatus(status string) (int64, error) {
 func (q *Queries) UpdateDownloadStatus(id int64, status models.DownloadStatus, searchID *string, err *string) error {
 	_, e := q.db.Exec(
 		`UPDATE download_queue SET status = ?, slskd_search_id = COALESCE(?, slskd_search_id),
-		 error = ?, last_attempt = ? WHERE id = ?`,
+		 error = ?, last_attempt = ?, next_retry_at = NULL WHERE id = ?`,
 		status, searchID, err, now(), id,
 	)
 	return e

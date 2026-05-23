@@ -134,6 +134,11 @@ func (s *Service) tick(ctx context.Context) {
 		if slots <= 0 {
 			break
 		}
+		if d.Attempts >= 4 {
+			errMsg := "exceeded maximum retry attempts"
+			s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusFailed, nil, &errMsg)
+			continue
+		}
 		if err := s.process(ctx, d); err != nil {
 			slog.Error("downloader: process", "download_id", d.ID, "error", err)
 		}
