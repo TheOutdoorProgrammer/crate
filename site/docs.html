@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crate — Documentation</title>
+  <meta name="description" content="Full documentation for Crate: configuration, settings, providers, API reference, and deployment.">
+  <link rel="icon" href="cratelogo.png">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #09090b;
+      --surface: #18181b;
+      --border: #27272a;
+      --text: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent: #f59e0b;
+      --accent-hover: #d97706;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); }
+
+    /* Nav */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(9, 9, 11, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      height: 3.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      font-weight: 700;
+      font-size: 1.125rem;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+
+    .nav-brand img { width: 28px; height: 28px; }
+
+    .nav-links { display: flex; align-items: center; gap: 1.5rem; }
+    .nav-links a { color: var(--text-secondary); font-size: 0.875rem; }
+    .nav-links a:hover { color: var(--text); }
+    .nav-links a.active { color: var(--accent); }
+
+    .btn-github {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      padding: 0.375rem 0.875rem;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      color: var(--text-secondary);
+      font-size: 0.8125rem;
+      transition: all 0.15s;
+    }
+    .btn-github:hover { color: var(--text); border-color: var(--text-muted); }
+    .btn-github svg { width: 16px; height: 16px; fill: currentColor; }
+
+    /* Layout */
+    .docs-layout {
+      display: flex;
+      max-width: 80rem;
+      margin: 0 auto;
+      padding-top: 3.5rem;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      position: sticky;
+      top: 3.5rem;
+      width: 15rem;
+      flex-shrink: 0;
+      height: calc(100vh - 3.5rem);
+      overflow-y: auto;
+      border-right: 1px solid var(--border);
+      padding: 2rem 1.5rem;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .sidebar-section { margin-bottom: 1.75rem; }
+
+    .sidebar-heading {
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin-bottom: 0.625rem;
+    }
+
+    .sidebar-link {
+      display: block;
+      padding: 0.25rem 0;
+      color: var(--text-secondary);
+      font-size: 0.8125rem;
+      transition: color 0.1s;
+    }
+    .sidebar-link:hover { color: var(--text); }
+
+    /* Content */
+    .docs-content {
+      flex: 1;
+      min-width: 0;
+      padding: 3rem 3rem 6rem;
+    }
+
+    .docs-content h1 {
+      font-size: 2.25rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.5rem;
+    }
+
+    .docs-content .lead {
+      font-size: 1.125rem;
+      color: var(--text-secondary);
+      margin-bottom: 3rem;
+      line-height: 1.7;
+    }
+
+    .docs-content h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-top: 3.5rem;
+      margin-bottom: 1rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .docs-content h2:first-of-type {
+      margin-top: 0;
+      border-top: none;
+      padding-top: 0;
+    }
+
+    .docs-content h3 {
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin-top: 2rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .docs-content p {
+      color: var(--text-secondary);
+      margin-bottom: 1rem;
+      line-height: 1.7;
+    }
+
+    .docs-content ul, .docs-content ol {
+      color: var(--text-secondary);
+      margin-bottom: 1rem;
+      padding-left: 1.5rem;
+    }
+
+    .docs-content li {
+      margin-bottom: 0.375rem;
+      line-height: 1.6;
+    }
+
+    .docs-content strong { color: var(--text); }
+
+    /* Tables */
+    .table-wrap {
+      overflow-x: auto;
+      margin-bottom: 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+    }
+
+    thead { background: var(--surface); }
+
+    th {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      font-weight: 600;
+      color: var(--text);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 0.625rem 1rem;
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    /* Code */
+    code {
+      font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+      font-size: 0.8125rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem;
+      color: var(--accent);
+    }
+
+    .code-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.25rem 1.5rem;
+      overflow-x: auto;
+      font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+      font-size: 0.8125rem;
+      line-height: 1.7;
+      color: var(--text-secondary);
+      margin-bottom: 1.5rem;
+    }
+
+    .code-block .comment { color: var(--text-muted); }
+    .code-block .cmd { color: var(--text); }
+    .code-block .val { color: var(--accent); }
+
+    /* Callout */
+    .callout {
+      background: rgba(245, 158, 11, 0.06);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+      border-radius: 0.75rem;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+
+    .callout strong { color: var(--accent); }
+
+    /* Diagram */
+    .diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+      font-size: 0.75rem;
+      line-height: 1.6;
+      color: var(--text-secondary);
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    .diagram .highlight { color: var(--accent); }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 3rem 1.5rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+
+    footer a { color: var(--text-secondary); }
+
+    .footer-links {
+      display: flex;
+      gap: 1.5rem;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .docs-content { padding: 2rem 1.5rem 4rem; }
+      .docs-content h1 { font-size: 1.75rem; }
+      .nav-links .nav-link-text { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <a href="/" class="nav-brand">
+      <img src="cratelogo.png" alt="Crate">
+      <span>Crate</span>
+    </a>
+    <div class="nav-links">
+      <a href="/" class="nav-link-text">Home</a>
+      <a href="/docs.html" class="nav-link-text active">Docs</a>
+      <a href="https://github.com/TheOutdoorProgrammer/crate" class="btn-github">
+        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </nav>
+
+  <div class="docs-layout">
+
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Getting Started</div>
+        <a href="#overview" class="sidebar-link">Overview</a>
+        <a href="#deployment" class="sidebar-link">Deployment</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Configuration</div>
+        <a href="#environment-variables" class="sidebar-link">Environment Variables</a>
+        <a href="#settings" class="sidebar-link">UI Settings</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Concepts</div>
+        <a href="#providers" class="sidebar-link">Providers</a>
+        <a href="#download-flow" class="sidebar-link">Download Flow</a>
+        <a href="#quality-upgrades" class="sidebar-link">Quality Upgrades</a>
+        <a href="#navidrome" class="sidebar-link">Navidrome</a>
+        <a href="#supported-formats" class="sidebar-link">Supported Formats</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Reference</div>
+        <a href="#api" class="sidebar-link">API Reference</a>
+        <a href="#custom-providers" class="sidebar-link">Custom Providers</a>
+        <a href="#database" class="sidebar-link">Database</a>
+      </div>
+    </aside>
+
+    <main class="docs-content">
+
+      <h1>Documentation</h1>
+      <p class="lead">Everything you need to deploy, configure, and extend Crate.</p>
+
+      <!-- Overview -->
+      <h2 id="overview">Overview</h2>
+
+      <p>Crate is a self-hosted music manager for collectors. It connects to music metadata providers (MusicBrainz, Deezer, or your own) to search and browse artists, then downloads tracks from Soulseek via <a href="https://github.com/slskd/slskd">slskd</a>. Downloaded files are automatically organized, tagged with full metadata and cover art, and placed in your library.</p>
+
+      <p>The stack is a Go backend with SQLite, a React frontend, and standalone gRPC provider binaries &mdash; all shipped in a single Docker image.</p>
+
+      <div class="diagram"><span class="highlight">crate</span> (main process)
+  ├── HTTP API + React SPA
+  ├── Provider Manager
+  │   ├── gRPC → <span class="highlight">provider-musicbrainz</span> (:50051)
+  │   ├── gRPC → <span class="highlight">provider-deezer</span> (:50052)
+  │   └── gRPC → custom external provider
+  ├── Scheduler (new releases, auto-queue, quality upgrades)
+  ├── Downloader (slskd integration)
+  ├── Organizer (file moves + renaming)
+  ├── Tagger (ID3/FLAC metadata + cover art)
+  └── Navidrome notifier (optional library scan trigger)</div>
+
+      <!-- Deployment -->
+      <h2 id="deployment">Deployment</h2>
+
+      <p>The recommended deployment is via Docker Compose with slskd as a sidecar. Crate needs a Soulseek account (provided through slskd) to download music.</p>
+
+      <div class="code-block"><span class="comment"># docker-compose.yml</span>
+<span class="cmd">services:</span>
+  <span class="cmd">crate:</span>
+    <span class="cmd">image: ghcr.io/theoutdoorprogrammer/crate:latest</span>
+    ports:
+      - <span class="val">"6969:6969"</span>
+    volumes:
+      - ./crate-data:/app/data        <span class="comment"># databases (crate.db, cache.db, activity.db)</span>
+      - ./slskd/downloads:/app/downloads
+      - ./library:/app/library
+    environment:
+      - CRATE_SLSKD_URL=<span class="val">http://slskd:5030</span>
+      - CRATE_SLSKD_API_KEY=<span class="val">your_api_key</span>
+      - CRATE_DOWNLOADS_DIR=<span class="val">/app/downloads</span>
+      - CRATE_LIBRARY_PATH=<span class="val">/app/library</span>
+      - CRATE_DB_PATH=<span class="val">/app/data/crate.db</span>
+      - CRATE_CACHE_PATH=<span class="val">/app/data/cache.db</span>
+      - CRATE_ACTIVITY_PATH=<span class="val">/app/data/activity.db</span>
+    depends_on:
+      - slskd
+    restart: unless-stopped
+
+  <span class="cmd">slskd:</span>
+    <span class="cmd">image: slskd/slskd:latest</span>
+    ports:
+      - <span class="val">"5030:5030"</span>
+    volumes:
+      - ./slskd:/app
+      - ./library:/crate
+    environment:
+      - SLSKD_REMOTE_CONFIGURATION=<span class="val">true</span>
+      - SLSKD_API_KEY=<span class="val">your_api_key</span>
+      - SLSKD_SOULSEEK_USERNAME=<span class="val">your_username</span>
+      - SLSKD_SOULSEEK_PASSWORD=<span class="val">your_password</span>
+    restart: unless-stopped</div>
+
+      <div class="callout">
+        <strong>Tip:</strong> The <code>CRATE_SLSKD_API_KEY</code> must match the <code>SLSKD_API_KEY</code> you set for slskd. These two services communicate over the slskd REST API.
+      </div>
+
+      <h3>Volumes</h3>
+      <p>Three volume mounts are important:</p>
+      <ul>
+        <li><strong>Data directory</strong> &mdash; where Crate stores its SQLite databases. Map to a persistent path.</li>
+        <li><strong>Downloads directory</strong> &mdash; shared with slskd. Crate reads completed downloads from here. Must be the same path slskd writes to.</li>
+        <li><strong>Library directory</strong> &mdash; where organized, tagged music files end up. Point your media server (Navidrome, Plex, etc.) here.</li>
+      </ul>
+
+      <h3>Authentication</h3>
+      <p>Crate does not include built-in authentication. It's designed to run behind your existing auth layer &mdash; a reverse proxy with basic auth, Authelia, Authentik, Cloudflare Access, a VPN, or whatever you prefer. If it's only accessible on your local network, no auth may be necessary.</p>
+
+      <!-- Environment Variables -->
+      <h2 id="environment-variables">Environment Variables</h2>
+
+      <p>These are set at startup and control core paths, ports, and provider configuration. All have sensible defaults &mdash; only <code>CRATE_SLSKD_API_KEY</code> is required.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Variable</th>
+              <th>Default</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>CRATE_PORT</code></td>
+              <td><code>6969</code></td>
+              <td>HTTP port the web UI and API listen on.</td>
+            </tr>
+            <tr>
+              <td><code>CRATE_DB_PATH</code></td>
+              <td><code>./crate.db</code></td>
+              <td>Path to the main SQLite database.</td>
+            </tr>
+            <tr>
+              <td><code>CRATE_CACHE_PATH</code></td>
+              <td><code>./cache.db</code></td>
+              <td>Path to the provider cache database. Stores cached search results and metadata with a configurable TTL.</td>
+            </tr>
+            <tr>
+              <td><code>CRATE_ACTIVITY_PATH</code></td>
+              <td><code>./activity.db</code></td>
+              <td>Path to the activity log database. Records download events, errors, and system events.</td>
+            </tr>
+            <tr>
+              <td><code>CRATE_DOWNLOADS_DIR</code></td>
+              <td><code>./downloads</code></td>
+              <td>Directory where slskd places completed downloads. Crate reads from here.</td>
+            </tr>
+            <tr>
+              <td><code>CRATE_LIBRARY_PATH</code></td>
+              <td><code>./library</code></td>
+              <td>Directory where organized music files are placed. Structure: <code>Artist/Album/Track.ext</code></td>
+            </tr>
+            <tr>
+              <td><code>CRATE_SCAN_INTERVAL</code></td>
+              <td><code>6h</code></td>
+              <td>How often the scheduler runs (new release detection, auto-queue, quality upgrades). Accepts Go duration strings: <code>30m</code>, <code>6h</code>, <code>24h</code>, etc.</td>
+            </tr>
+            <tr>
+              <td><code>CRATE_SLSKD_URL</code></td>
+              <td><code>http://localhost:5030</code></td>
+              <td>Base URL of your slskd instance.</td>
+            </tr>
+            <tr>
+              <td><code>CRATE_SLSKD_API_KEY</code></td>
+              <td><em>none</em></td>
+              <td>API key for slskd. <strong>Required</strong> for downloads to work.</td>
+            </tr>
+            <tr>
+              <td><code>CRATE_PROVIDERS</code></td>
+              <td><code>musicbrainz:./provider-musicbrainz:50051,deezer:./provider-deezer:50052</code></td>
+              <td>Comma-separated list of providers. Format: <code>name:binary:port</code>. See <a href="#providers">Providers</a>.</td>
+            </tr>
+            <tr>
+              <td><code>CRATE_MB_USER_AGENT</code></td>
+              <td><code>Crate/0.1.0 ...</code></td>
+              <td>User-Agent string for MusicBrainz API requests. MusicBrainz requires a descriptive User-Agent.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Settings -->
+      <h2 id="settings">UI Settings</h2>
+
+      <p>These settings are stored in the database and configurable from the Settings page in the web UI. Changes take effect immediately without restarting.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Setting</th>
+              <th>Default</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>provider_primary</code></td>
+              <td><code>musicbrainz</code></td>
+              <td>Default provider for search and browse. Can be switched on the fly from the search UI.</td>
+            </tr>
+            <tr>
+              <td><code>cache_ttl_hours</code></td>
+              <td><code>24</code></td>
+              <td>How long provider search results and metadata are cached before re-fetching.</td>
+            </tr>
+            <tr>
+              <td><code>quality_tiers</code></td>
+              <td><code>FLAC &gt; MP3 320 &gt; MP3 256</code></td>
+              <td>Priority-ordered list of acceptable download formats. The downloader picks the highest-tier match from available sources. Stored as JSON.</td>
+            </tr>
+            <tr>
+              <td><code>max_concurrent_slskd</code></td>
+              <td><code>10</code></td>
+              <td>Maximum number of simultaneous downloads from Soulseek.</td>
+            </tr>
+            <tr>
+              <td><code>max_auto_queue</code></td>
+              <td><code>50</code></td>
+              <td>Maximum tracks the scheduler will auto-queue per cycle. Prevents flooding the download queue.</td>
+            </tr>
+            <tr>
+              <td><code>requeue_cooldown_days</code></td>
+              <td><code>7</code></td>
+              <td>Minimum days before a failed track can be re-queued by the scheduler.</td>
+            </tr>
+            <tr>
+              <td><code>activity_retention_days</code></td>
+              <td><code>30</code></td>
+              <td>How long activity log entries are kept before automatic cleanup.</td>
+            </tr>
+            <tr>
+              <td><code>scan_interval</code></td>
+              <td><em>from env</em></td>
+              <td>Override the scheduler interval at runtime (same format as <code>CRATE_SCAN_INTERVAL</code>).</td>
+            </tr>
+            <tr>
+              <td><code>slskd_url</code></td>
+              <td><em>from env</em></td>
+              <td>Override the slskd URL at runtime.</td>
+            </tr>
+            <tr>
+              <td><code>slskd_api_key</code></td>
+              <td><em>from env</em></td>
+              <td>Override the slskd API key at runtime. Treated as sensitive (masked in the UI).</td>
+            </tr>
+            <tr>
+              <td><code>library_path</code></td>
+              <td><em>from env</em></td>
+              <td>Override the library path at runtime.</td>
+            </tr>
+            <tr>
+              <td><code>download_format_preference</code></td>
+              <td><em>none</em></td>
+              <td>Preferred download format when multiple options are equivalent in quality tier.</td>
+            </tr>
+            <tr>
+              <td><code>navidrome_url</code></td>
+              <td><em>none</em></td>
+              <td>Base URL of your Navidrome instance. See <a href="#navidrome">Navidrome Integration</a>.</td>
+            </tr>
+            <tr>
+              <td><code>navidrome_user</code></td>
+              <td><em>none</em></td>
+              <td>Navidrome username for triggering library scans.</td>
+            </tr>
+            <tr>
+              <td><code>navidrome_password</code></td>
+              <td><em>none</em></td>
+              <td>Navidrome password. Treated as sensitive (masked in the UI).</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <strong>Note:</strong> Settings like <code>slskd_url</code>, <code>slskd_api_key</code>, <code>library_path</code>, and <code>scan_interval</code> can be set via environment variables at startup <em>or</em> overridden in the UI. The UI value takes precedence when set.
+      </div>
+
+      <!-- Providers -->
+      <h2 id="providers">Providers</h2>
+
+      <p>Providers supply music metadata (artist search, discography browsing, album/track details, cover art). Crate ships with two built-in providers and supports adding custom ones via gRPC.</p>
+
+      <h3>Built-in Providers</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Source</th>
+              <th>Rate Limit</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>MusicBrainz</strong></td>
+              <td>MusicBrainz.org API</td>
+              <td>1 req/s</td>
+              <td>Open database. Best for completeness and accuracy. Default provider.</td>
+            </tr>
+            <tr>
+              <td><strong>Deezer</strong></td>
+              <td>Deezer public API</td>
+              <td>10 req/s</td>
+              <td>Faster browsing, good cover art. Useful as a secondary provider.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>How Providers Work</h3>
+      <ul>
+        <li><strong>Default provider</strong> &mdash; set in settings as <code>provider_primary</code>. Used for search and browse unless the user switches providers in the search UI.</li>
+        <li><strong>Entity tracking</strong> &mdash; every artist, album, and track stores which provider and provider ID it came from. This is how Crate knows where to check for new releases.</li>
+        <li><strong>Provider switching</strong> &mdash; you can change the default provider at any time. Existing entities keep their original provider association.</li>
+        <li><strong>Relinking</strong> &mdash; any entity can be relinked to a different provider via the API. Useful if you switch primary providers and want to unify your library.</li>
+        <li><strong>Orphan detection</strong> &mdash; if a provider goes offline, entities from that provider show as &ldquo;orphaned&rdquo; in the UI.</li>
+        <li><strong>Caching</strong> &mdash; provider responses are cached in a separate SQLite database (<code>cache.db</code>) with configurable TTL. The cache can be cleared from the Settings page.</li>
+      </ul>
+
+      <h3>Provider Configuration</h3>
+      <p>The <code>CRATE_PROVIDERS</code> environment variable defines which providers to load. Format:</p>
+
+      <div class="code-block"><span class="comment"># Built-in providers (binary path relative to crate binary)</span>
+<span class="cmd">CRATE_PROVIDERS</span>=<span class="val">musicbrainz:./provider-musicbrainz:50051,deezer:./provider-deezer:50052</span>
+
+<span class="comment"># External provider (network address instead of binary path)</span>
+<span class="cmd">CRATE_PROVIDERS</span>=<span class="val">musicbrainz:./provider-musicbrainz:50051,spotify:external:192.168.1.10:50053</span></div>
+
+      <p>Built-in providers are started as child processes by Crate. External providers connect to a remote gRPC server you run separately.</p>
+
+      <!-- Download Flow -->
+      <h2 id="download-flow">Download Flow</h2>
+
+      <p>When you watch an artist, album, or track, here's what happens:</p>
+
+      <ol>
+        <li><strong>Queuing</strong> &mdash; watched items are saved with status <code>wanted</code>. The scheduler checks for new wanted tracks every scan interval.</li>
+        <li><strong>Search</strong> &mdash; Crate searches slskd (Soulseek) for each wanted track, scoring results by quality tier, file format, and bitrate.</li>
+        <li><strong>Selection</strong> &mdash; the best result is selected based on your quality tiers. Blacklisted sources are excluded.</li>
+        <li><strong>Download</strong> &mdash; the file is downloaded via slskd. Track status changes to <code>downloading</code>. The downloader checks progress every 10 seconds.</li>
+        <li><strong>Organize</strong> &mdash; completed downloads are moved into the library with the naming convention <code>Artist/Album/Track.ext</code>.</li>
+        <li><strong>Tag</strong> &mdash; metadata (artist, album, track name, track number, year) and cover art are embedded into the file.</li>
+        <li><strong>Notify</strong> &mdash; if Navidrome is configured, a library scan is triggered. Track status becomes <code>owned</code>.</li>
+      </ol>
+
+      <h3>Retry &amp; Blacklist</h3>
+      <p>Not every download succeeds on the first try. Crate handles failures automatically:</p>
+      <ul>
+        <li><strong>No results</strong> &mdash; track stays <code>wanted</code>. The scheduler will try again on the next cycle.</li>
+        <li><strong>Transfer failure</strong> (rejected, errored, cancelled) &mdash; the specific username + filename pair is blacklisted. Future searches skip that source but can still find the track from other users.</li>
+        <li><strong>Retry backoff</strong> &mdash; failed downloads retry with increasing delays: 5m &rarr; 15m &rarr; 30m &rarr; 1h. After 4 attempts (~2 hours), the track reverts to <code>wanted</code> for the next scheduler cycle.</li>
+      </ul>
+
+      <h3>Concurrency</h3>
+      <p>The <code>max_concurrent_slskd</code> setting (default 10) limits how many downloads run simultaneously. The <code>max_auto_queue</code> setting (default 50) caps how many tracks the scheduler adds per cycle, preventing the queue from growing unbounded.</p>
+
+      <!-- Quality Upgrades -->
+      <h2 id="quality-upgrades">Quality Upgrades</h2>
+
+      <p>Crate continuously improves your library quality. The quality system works as follows:</p>
+
+      <ol>
+        <li><strong>Quality tiers</strong> are priority-ordered in settings (default: FLAC &gt; MP3 320 &gt; MP3 256). Higher in the list = better.</li>
+        <li>When a track is downloaded, its format and bitrate are recorded.</li>
+        <li>The scheduler scans one artist per day (round-robin), checking if any owned tracks can be upgraded to a higher quality tier.</li>
+        <li>Upgradeable tracks are re-queued automatically. The new download replaces the old file.</li>
+      </ol>
+
+      <p>The <code>requeue_cooldown_days</code> setting (default 7) prevents the scheduler from re-queuing the same track too frequently if better quality isn't available yet.</p>
+
+      <!-- Navidrome -->
+      <h2 id="navidrome">Navidrome Integration</h2>
+
+      <p>Crate can trigger a <a href="https://www.navidrome.org/">Navidrome</a> library scan after each successful download, so new music appears in your streaming library immediately.</p>
+
+      <h3>Setup</h3>
+      <p>Configure these three settings in the Crate UI (Settings page):</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Setting</th>
+              <th>Example</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>navidrome_url</code></td>
+              <td><code>http://navidrome:4533</code></td>
+            </tr>
+            <tr>
+              <td><code>navidrome_user</code></td>
+              <td><code>admin</code></td>
+            </tr>
+            <tr>
+              <td><code>navidrome_password</code></td>
+              <td><code>your_password</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>All three fields are required. If any are empty, the Navidrome integration is silently disabled. Crate authenticates via the Subsonic API token+salt scheme.</p>
+
+      <div class="callout">
+        <strong>Tip:</strong> Point both Crate's <code>CRATE_LIBRARY_PATH</code> and Navidrome's music folder to the same directory (or use a shared volume). Crate organizes files into <code>Artist/Album/Track.ext</code> which Navidrome indexes automatically.
+      </div>
+
+      <!-- Supported Formats -->
+      <h2 id="supported-formats">Supported Formats</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Format</th>
+              <th>Extension</th>
+              <th>Type</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>FLAC</td><td><code>.flac</code></td><td>Lossless</td></tr>
+            <tr><td>WAV</td><td><code>.wav</code></td><td>Lossless</td></tr>
+            <tr><td>MP3</td><td><code>.mp3</code></td><td>Lossy</td></tr>
+            <tr><td>Ogg Vorbis</td><td><code>.ogg</code></td><td>Lossy</td></tr>
+            <tr><td>Opus</td><td><code>.opus</code></td><td>Lossy</td></tr>
+            <tr><td>AAC</td><td><code>.aac</code></td><td>Lossy</td></tr>
+            <tr><td>MPEG-4 Audio</td><td><code>.m4a</code></td><td>Lossy</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The downloader recognizes all these formats when scoring search results. The tagger embeds metadata into FLAC (Vorbis comments) and MP3 (ID3v2) files. Cover art is embedded in both formats.</p>
+
+      <!-- API Reference -->
+      <h2 id="api">API Reference</h2>
+
+      <p>Crate exposes a REST API on the same port as the web UI. All endpoints return JSON.</p>
+
+      <h3>Status</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET</code></td><td><code>/api/status</code></td><td>Health check and system status.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Search &amp; Browse</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET</code></td><td><code>/api/search?q=&amp;limit=&amp;offset=</code></td><td>Search for artists via the active provider. Paginated.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/api/browse/artist/{id}</code></td><td>Browse an artist's full discography from the provider.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/api/browse/album/{id}</code></td><td>Browse an album's track listing from the provider.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Library</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET</code></td><td><code>/api/library/search?q=</code></td><td>Search your local library.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/api/artists</code></td><td>List all watched/owned artists.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/api/artists/{id}</code></td><td>Get artist details with albums.</td></tr>
+            <tr><td><code>DELETE</code></td><td><code>/api/artists/{id}</code></td><td>Remove artist and all associated data.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/api/albums/{id}</code></td><td>Get album details with tracks.</td></tr>
+            <tr><td><code>DELETE</code></td><td><code>/api/albums/{id}</code></td><td>Remove album.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/api/tracks/{id}</code></td><td>Get track details.</td></tr>
+            <tr><td><code>DELETE</code></td><td><code>/api/tracks/{id}</code></td><td>Remove track.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Watching</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>POST</code></td><td><code>/api/watch/artist</code></td><td>Watch an artist (full discography tracking).</td></tr>
+            <tr><td><code>POST</code></td><td><code>/api/watch/album</code></td><td>Watch a specific album.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/api/watch/track</code></td><td>Watch a specific track.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Downloads</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET</code></td><td><code>/api/downloads</code></td><td>List current download queue.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/api/downloads/{id}/retry</code></td><td>Retry a failed download.</td></tr>
+            <tr><td><code>DELETE</code></td><td><code>/api/downloads/{id}</code></td><td>Cancel/remove a download.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Providers</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET</code></td><td><code>/api/providers</code></td><td>List all configured providers with health status.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/api/relink/artist/{id}</code></td><td>Relink an artist to a different provider.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/api/relink/album/{id}</code></td><td>Relink an album to a different provider.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/api/relink/track/{id}</code></td><td>Relink a track to a different provider.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Settings &amp; Activity</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET</code></td><td><code>/api/settings</code></td><td>Get all settings (sensitive values masked).</td></tr>
+            <tr><td><code>PUT</code></td><td><code>/api/settings</code></td><td>Update settings.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/api/activity?limit=&amp;offset=</code></td><td>Get activity log. Paginated.</td></tr>
+            <tr><td><code>DELETE</code></td><td><code>/api/cache</code></td><td>Clear the provider cache.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Custom Providers -->
+      <h2 id="custom-providers">Custom Providers</h2>
+
+      <p>You can build your own metadata provider by implementing the gRPC service defined in <a href="https://github.com/TheOutdoorProgrammer/crate/blob/main/proto/provider/provider.proto"><code>proto/provider/provider.proto</code></a>. The service interface includes:</p>
+
+      <ul>
+        <li><code>SearchArtists</code> &mdash; search by name, return ranked results</li>
+        <li><code>GetArtist</code> &mdash; full artist details with discography</li>
+        <li><code>GetAlbum</code> &mdash; album details with track listing</li>
+        <li><code>GetTrack</code> &mdash; individual track details</li>
+      </ul>
+
+      <p>Run your provider as a standalone gRPC server and add it to the <code>CRATE_PROVIDERS</code> env var:</p>
+
+      <div class="code-block"><span class="cmd">CRATE_PROVIDERS</span>=<span class="val">musicbrainz:./provider-musicbrainz:50051,my-provider:external:my-host:50053</span></div>
+
+      <p>Use the <code>external</code> keyword as the binary path to tell Crate it should connect to a remote server instead of launching a child process. Community-built providers and the database schema are documented in <a href="https://github.com/TheOutdoorProgrammer/crate/blob/main/DATABASE.md">DATABASE.md</a>.</p>
+
+      <!-- Database -->
+      <h2 id="database">Database</h2>
+
+      <p>Crate uses three SQLite databases:</p>
+      <ul>
+        <li><strong><code>crate.db</code></strong> &mdash; main database. Artists, albums, tracks, settings, download queue, blacklist. WAL mode, single writer connection. Schema migrations via <a href="https://github.com/pressly/goose">goose</a> (embedded SQL files, run automatically on startup).</li>
+        <li><strong><code>cache.db</code></strong> &mdash; provider response cache with TTL. Can be safely deleted to force re-fetching, or cleared from the Settings page.</li>
+        <li><strong><code>activity.db</code></strong> &mdash; event log. Download completions, errors, scheduler actions. Auto-pruned based on <code>activity_retention_days</code>.</li>
+      </ul>
+
+      <p>The full database schema is documented in <a href="https://github.com/TheOutdoorProgrammer/crate/blob/main/DATABASE.md">DATABASE.md</a> in the repository.</p>
+
+    </main>
+
+  </div>
+
+  <footer>
+    <div class="footer-links">
+      <a href="https://github.com/TheOutdoorProgrammer/crate">GitHub</a>
+      <a href="https://github.com/TheOutdoorProgrammer/crate/blob/main/DATABASE.md">Database Docs</a>
+      <a href="https://github.com/TheOutdoorProgrammer/crate/issues">Issues</a>
+    </div>
+    <p>Self-hosted. Open source. Built for collectors.</p>
+  </footer>
+
+</body>
+</html>
