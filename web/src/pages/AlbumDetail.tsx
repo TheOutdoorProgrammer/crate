@@ -52,6 +52,36 @@ export default function AlbumDetail() {
     },
   });
 
+  const ignoreAlbum = useMutation({
+    mutationFn: () => api.ignoreAlbum(Number(id)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['album', id] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+    },
+  });
+
+  const unignoreAlbum = useMutation({
+    mutationFn: () => api.unignoreAlbum(Number(id)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['album', id] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+    },
+  });
+
+  const ignoreTrack = useMutation({
+    mutationFn: (trackId: number) => api.ignoreTrack(trackId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['album', id] });
+    },
+  });
+
+  const unignoreTrack = useMutation({
+    mutationFn: (trackId: number) => api.unignoreTrack(trackId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['album', id] });
+    },
+  });
+
   const queueTrack = useMutation({
     mutationFn: (trackId: number) => api.queueTrack(trackId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['downloads'] }),
@@ -179,6 +209,20 @@ export default function AlbumDetail() {
           </div>
         </div>
         <button
+          onClick={() => { if (album.status === 'ignored') { unignoreAlbum.mutate(); } else { ignoreAlbum.mutate(); } }}
+          disabled={ignoreAlbum.isPending || unignoreAlbum.isPending}
+          className={`p-1.5 rounded-lg transition-colors shrink-0 ${
+            album.status === 'ignored'
+              ? 'text-zinc-400 bg-zinc-700 active:bg-zinc-800'
+              : 'text-zinc-500 bg-zinc-800 active:bg-zinc-700'
+          }`}
+          title={album.status === 'ignored' ? 'Unignore album' : 'Ignore album'}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill={album.status === 'ignored' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" />
+          </svg>
+        </button>
+        <button
           onClick={handleUnwatchAlbum}
           disabled={unwatchAlbum.isPending}
           className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 active:bg-red-900/40 active:text-red-400 transition-colors shrink-0"
@@ -279,6 +323,22 @@ export default function AlbumDetail() {
                           </svg>
                         </button>
                       </>
+                    )}
+                    {(track.status === 'wanted' || track.status === 'ignored') && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (track.status === 'ignored') { unignoreTrack.mutate(track.id); } else { ignoreTrack.mutate(track.id); }
+                        }}
+                        className={`shrink-0 transition-colors ${
+                          track.status === 'ignored' ? 'text-zinc-400' : 'text-zinc-600 active:text-zinc-400'
+                        }`}
+                        title={track.status === 'ignored' ? 'Unignore track' : 'Ignore track'}
+                      >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill={track.status === 'ignored' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" />
+                        </svg>
+                      </button>
                     )}
                     <button
                       onClick={(e) => { e.stopPropagation(); unwatchTrack.mutate(track.id); }}

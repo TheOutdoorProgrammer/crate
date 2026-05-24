@@ -88,6 +88,42 @@ Open `http://localhost:6969`.
 - **Settings UI** -- configure providers, slskd connection, Navidrome, quality tiers, library path, scan interval, and more from the browser
 - **Mobile-first** -- responsive layout with bottom nav on mobile, sidebar on desktop
 
+## Lidarr API Compatibility
+
+Crate ships a Lidarr v1 API shim at `/api/v1/` so iOS apps like [Helmarr](https://apps.apple.com/us/app/helmarr/id1638624921) can manage your library as if Crate were Lidarr. No extra configuration needed -- point the app at your Crate URL with any API key and it works.
+
+### Concept mapping
+
+Lidarr and Crate model things differently. The shim translates between them:
+
+| Lidarr concept | Crate equivalent | Notes |
+|---|---|---|
+| Monitor "all" | Artist status `watched` | Full discography tracked |
+| Monitor "latest" | Watch newest album + enable new releases | Most recent album by year, future albums auto-added |
+| Quality profile | "Crate Quality" | Crate uses priority-ordered quality tiers instead of Lidarr-style profiles |
+| Metadata profile | Active provider name | Shows whichever provider is set as primary (MusicBrainz, Deezer, etc.) |
+| Root folder | `CRATE_LIBRARY_PATH` | Library directory with real disk stats |
+| Monitored album | Album status `watched` | Tracks set to `wanted` |
+| Unmonitored album | Album status `ignored` | Tracks cascade to `ignored` (preserves `owned`/`downloading`) |
+| ArtistSearch command | Queue all wanted tracks | Same as "Search wanted tracks" in the UI |
+| AlbumSearch command | Queue album's wanted tracks | Same as "Search wanted tracks" on the album page |
+| Interactive search | Manual search | Browse slskd results, pick a specific file |
+| "Search for missing albums" on add | Auto-queue after watch | Queues all wanted tracks immediately |
+
+### Supported endpoints
+
+System status, health, disk space, quality/metadata profiles, root folders, custom filters, calendar, history, wanted/missing, queue, search, artist CRUD, album CRUD (including monitor toggle), track listing, release (interactive search), and commands (ArtistSearch, AlbumSearch).
+
+### Auth
+
+The shim accepts any API key in the `X-Api-Key` header or `apikey` query parameter. Crate has no built-in auth -- use a reverse proxy if you need access control.
+
+### Tested with
+
+- [Helmarr](https://apps.apple.com/us/app/helmarr/id1638624921) (iOS) -- full artist/album management, search, monitoring, interactive search
+
+Contributions to expand Lidarr API coverage are welcome.
+
 ## Roadmap
 
 - [ ] **Import existing library** -- see [DATABASE.md](DATABASE.md) for schema docs to write custom importers

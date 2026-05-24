@@ -598,6 +598,60 @@ func (s *Server) handleUnwatchAlbum(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleIgnoreAlbum(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.queries.UpdateAlbumStatus(id, models.AlbumStatusIgnored); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to ignore album")
+		return
+	}
+	s.queries.UpdateTrackStatusByAlbum(id, models.TrackStatusWanted, models.TrackStatusIgnored)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
+}
+
+func (s *Server) handleUnignoreAlbum(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.queries.UpdateAlbumStatus(id, models.AlbumStatusWatched); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to unignore album")
+		return
+	}
+	s.queries.UpdateTrackStatusByAlbum(id, models.TrackStatusIgnored, models.TrackStatusWanted)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "watched"})
+}
+
+func (s *Server) handleIgnoreTrack(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.queries.UpdateTrackStatus(id, models.TrackStatusIgnored); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to ignore track")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
+}
+
+func (s *Server) handleUnignoreTrack(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.queries.UpdateTrackStatus(id, models.TrackStatusWanted); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to unignore track")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "wanted"})
+}
+
 func (s *Server) handleQueueTrack(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {

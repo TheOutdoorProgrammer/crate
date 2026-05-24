@@ -69,7 +69,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	org := &noopOrganizer{}
 	dl := downloader.NewService(queries, slskdClient, org, actLog)
 
-	srv := api.NewServer(queries, providerMgr, c, dl, actLog, nil)
+	srv := api.NewServer(queries, providerMgr, c, dl, actLog, nil, "/music")
 
 	return &testEnv{
 		server:      srv,

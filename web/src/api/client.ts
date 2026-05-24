@@ -71,6 +71,15 @@ export const api = {
   unwatchTrack: (id: number) =>
     request<void>(`/tracks/${id}`, { method: 'DELETE' }),
 
+  ignoreAlbum: (id: number) =>
+    request<void>(`/albums/${id}/ignore`, { method: 'PUT' }),
+  unignoreAlbum: (id: number) =>
+    request<void>(`/albums/${id}/ignore`, { method: 'DELETE' }),
+  ignoreTrack: (id: number) =>
+    request<void>(`/tracks/${id}/ignore`, { method: 'PUT' }),
+  unignoreTrack: (id: number) =>
+    request<void>(`/tracks/${id}/ignore`, { method: 'DELETE' }),
+
   listDownloads: (status?: string) =>
     request<DownloadQueueItem[]>(`/downloads${status ? `?status=${status}` : ''}`),
   getDownloadProgress: () =>

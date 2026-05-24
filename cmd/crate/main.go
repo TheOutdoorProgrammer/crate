@@ -61,7 +61,7 @@ func main() {
 	org := organizer.NewService(queries, cfg.DownloadsDir, cfg.LibraryPath)
 	dl := downloader.NewService(queries, slskdClient, org, actLog)
 	dl.AddNotifier(navidrome.NewClient(queries))
-	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS)
+	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

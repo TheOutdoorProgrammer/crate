@@ -378,8 +378,12 @@ export default function ArtistDetail() {
 function AlbumStatusSummary({ tracks }: { tracks?: Track[] }) {
   if (!tracks?.length) return null;
   const owned = tracks.filter((t) => t.status === 'owned').length;
+  const ignored = tracks.filter((t) => t.status === 'ignored').length;
   const total = tracks.length;
 
+  if (ignored === total) {
+    return <span className="text-[10px] font-medium text-zinc-500 shrink-0">ignored</span>;
+  }
   if (owned === total) {
     return <span className="text-[10px] font-medium text-green-400 shrink-0">owned</span>;
   }

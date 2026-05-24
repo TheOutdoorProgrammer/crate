@@ -27,9 +27,11 @@ type Server struct {
 	router      chi.Router
 	frontendFS  fs.FS
 	bgWork      sync.WaitGroup
+	startTime   time.Time
+	libraryDir  string
 }
 
-func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS) *Server {
+func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string) *Server {
 	s := &Server{
 		queries:     queries,
 		providers:   providers,
@@ -37,6 +39,8 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 		downloader:  dl,
 		activityLog: actLog,
 		frontendFS:  frontendFS,
+		startTime:   time.Now().UTC(),
+		libraryDir:  libraryDir,
 	}
 	s.router = s.setupRouter()
 	return s
@@ -95,6 +99,8 @@ func (s *Server) setupRouter() chi.Router {
 		r.Route("/albums", func(r chi.Router) {
 			r.Get("/{id}", s.handleGetAlbum)
 			r.Post("/{id}/queue", s.handleQueueAlbumTracks)
+			r.Put("/{id}/ignore", s.handleIgnoreAlbum)
+			r.Delete("/{id}/ignore", s.handleUnignoreAlbum)
 			r.Delete("/{id}", s.handleUnwatchAlbum)
 		})
 
@@ -103,6 +109,8 @@ func (s *Server) setupRouter() chi.Router {
 			r.Post("/{id}/queue", s.handleQueueTrack)
 			r.Post("/{id}/search", s.handleManualSearch)
 			r.Post("/{id}/download", s.handleManualDownload)
+			r.Put("/{id}/ignore", s.handleIgnoreTrack)
+			r.Delete("/{id}/ignore", s.handleUnignoreTrack)
 		})
 
 		r.Route("/downloads", func(r chi.Router) {
@@ -129,6 +137,8 @@ func (s *Server) setupRouter() chi.Router {
 			r.Put("/", s.handleUpdateSettings)
 		})
 	})
+
+	s.mountLidarrRoutes(r)
 
 	if s.frontendFS != nil {
 		r.NotFound(SPAHandler(s.frontendFS))

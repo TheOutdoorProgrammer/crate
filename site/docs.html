@@ -410,6 +410,11 @@
         <a href="#supported-formats" class="sidebar-link">Supported Formats</a>
       </div>
       <div class="sidebar-section">
+        <div class="sidebar-heading">Integrations</div>
+        <a href="#lidarr" class="sidebar-link">Lidarr Compatibility</a>
+        <a href="#navidrome" class="sidebar-link">Navidrome</a>
+      </div>
+      <div class="sidebar-section">
         <div class="sidebar-heading">Reference</div>
         <a href="#api" class="sidebar-link">API Reference</a>
         <a href="#custom-providers" class="sidebar-link">Custom Providers</a>
@@ -762,6 +767,106 @@
       </ol>
 
       <p>The <code>requeue_cooldown_days</code> setting (default 7) prevents the scheduler from re-queuing the same track too frequently if better quality isn't available yet.</p>
+
+      <!-- Lidarr Compatibility -->
+      <h2 id="lidarr">Lidarr API Compatibility</h2>
+
+      <p>Crate includes a Lidarr v1 API compatibility shim at <code>/api/v1/</code>, allowing iOS and Android apps built for Lidarr to manage your Crate library. No extra configuration needed &mdash; point the app at your Crate URL with any API key and it works.</p>
+
+      <div class="callout">
+        <strong>Tested with:</strong> <a href="https://apps.apple.com/us/app/helmarr/id1638624921">Helmarr</a> (iOS) &mdash; full artist/album management, search, monitoring, and interactive search all work out of the box.
+      </div>
+
+      <h3>Concept Mapping</h3>
+      <p>Lidarr and Crate model things differently. The shim translates between them transparently:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Lidarr Concept</th>
+              <th>Crate Equivalent</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Monitor "all"</td>
+              <td>Artist status <code>watched</code></td>
+              <td>Full discography tracked.</td>
+            </tr>
+            <tr>
+              <td>Monitor "latest"</td>
+              <td>Watch newest album + enable new releases</td>
+              <td>Most recent album by year, future albums auto-added.</td>
+            </tr>
+            <tr>
+              <td>Quality profile</td>
+              <td>"Crate Quality"</td>
+              <td>Crate uses priority-ordered quality tiers instead of Lidarr-style profiles.</td>
+            </tr>
+            <tr>
+              <td>Metadata profile</td>
+              <td>Active provider name</td>
+              <td>Shows whichever provider is set as primary (MusicBrainz, Deezer, etc.).</td>
+            </tr>
+            <tr>
+              <td>Root folder</td>
+              <td><code>CRATE_LIBRARY_PATH</code></td>
+              <td>Library directory with real disk usage stats.</td>
+            </tr>
+            <tr>
+              <td>Monitored album</td>
+              <td>Album status <code>watched</code></td>
+              <td>Tracks set to <code>wanted</code>.</td>
+            </tr>
+            <tr>
+              <td>Unmonitored album</td>
+              <td>Album status <code>ignored</code></td>
+              <td>Tracks cascade to <code>ignored</code>, preserving <code>owned</code> and <code>downloading</code> states.</td>
+            </tr>
+            <tr>
+              <td>ArtistSearch command</td>
+              <td>Queue all wanted tracks</td>
+              <td>Same as "Search wanted tracks" in the Crate UI.</td>
+            </tr>
+            <tr>
+              <td>AlbumSearch command</td>
+              <td>Queue album's wanted tracks</td>
+              <td>Same as searching from the album page.</td>
+            </tr>
+            <tr>
+              <td>Interactive search</td>
+              <td>Manual search</td>
+              <td>Browse slskd results, pick a specific file to download.</td>
+            </tr>
+            <tr>
+              <td>"Search for missing" on add</td>
+              <td>Auto-queue after watch</td>
+              <td>Queues all wanted tracks immediately when enabled.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Supported Endpoints</h3>
+      <p>The shim implements the Lidarr v1 endpoints that mobile apps typically use:</p>
+      <ul>
+        <li><strong>System</strong> &mdash; status, health check, disk space</li>
+        <li><strong>Profiles</strong> &mdash; quality profiles, metadata profiles</li>
+        <li><strong>Library</strong> &mdash; root folders, custom filters, calendar, history, wanted/missing</li>
+        <li><strong>Artists</strong> &mdash; search, lookup, add (with monitoring strategy), list, get, delete</li>
+        <li><strong>Albums</strong> &mdash; list, delete, monitor/unmonitor toggle (with track status cascade)</li>
+        <li><strong>Tracks</strong> &mdash; list tracks for an album</li>
+        <li><strong>Downloads</strong> &mdash; queue status, interactive search (release endpoint)</li>
+        <li><strong>Commands</strong> &mdash; ArtistSearch, AlbumSearch</li>
+      </ul>
+
+      <h3>Authentication</h3>
+      <p>The shim accepts any API key in the <code>X-Api-Key</code> header or <code>apikey</code> query parameter. Crate has no built-in auth &mdash; use a reverse proxy if you need access control.</p>
+
+      <h3>Contributing</h3>
+      <p>The Lidarr shim covers the most common endpoints. If your app needs an endpoint that isn't implemented yet, contributions are welcome &mdash; the shim is a single file at <code>internal/api/lidarr.go</code>.</p>
 
       <!-- Navidrome -->
       <h2 id="navidrome">Navidrome Integration</h2>

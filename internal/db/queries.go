@@ -228,6 +228,12 @@ func (q *Queries) DeleteAlbum(id int64) error {
 	return err
 }
 
+func (q *Queries) UpdateTrackStatusByAlbum(albumID int64, from, to models.TrackStatus) error {
+	_, err := q.db.Exec(`UPDATE tracks SET status = ?, updated_at = ? WHERE album_id = ? AND status = ?`,
+		to, now(), albumID, from)
+	return err
+}
+
 // Tracks
 
 func (q *Queries) CreateTrack(t *models.Track) error {
