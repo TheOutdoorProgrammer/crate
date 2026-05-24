@@ -218,7 +218,7 @@ export default function AlbumDetail() {
           }`}
           title={album.status === 'ignored' ? 'Unignore album' : 'Ignore album'}
         >
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill={album.status === 'ignored' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill={album.status === 'ignored' ? 'none' : 'currentColor'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" />
           </svg>
         </button>
@@ -335,7 +335,7 @@ export default function AlbumDetail() {
                         }`}
                         title={track.status === 'ignored' ? 'Unignore track' : 'Ignore track'}
                       >
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill={track.status === 'ignored' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill={track.status === 'ignored' ? 'none' : 'currentColor'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" />
                         </svg>
                       </button>
