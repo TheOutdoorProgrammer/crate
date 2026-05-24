@@ -135,8 +135,8 @@ export default function AlbumDetail() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
-  const handleUnwatchAlbum = () => {
-    if (confirm(`Stop watching ${album?.title}?`)) {
+  const handleDeleteAlbum = () => {
+    if (confirm(`Delete ${album?.title}? This removes all its tracks from your library.`)) {
       unwatchAlbum.mutate();
     }
   };
@@ -223,11 +223,11 @@ export default function AlbumDetail() {
           </svg>
         </button>
         <button
-          onClick={handleUnwatchAlbum}
+          onClick={handleDeleteAlbum}
           disabled={unwatchAlbum.isPending}
           className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 active:bg-red-900/40 active:text-red-400 transition-colors shrink-0"
         >
-          Unwatch
+          Delete
         </button>
       </div>
 
@@ -295,16 +295,22 @@ export default function AlbumDetail() {
                         </p>
                       )}
                     </div>
-                    <StatusBadge status={track.status} />
-                    {track.status === 'wanted' && (
+                    {track.status === 'owned' && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase bg-green-900/50 text-green-400">owned</span>
+                    )}
+                    {track.status === 'downloading' && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase bg-blue-900/50 text-blue-400">downloading</span>
+                    )}
+                    {(track.status === 'wanted' || track.status === 'ignored') && (
                       <>
                         <button
                           onClick={(e) => { e.stopPropagation(); queueTrack.mutate(track.id); }}
-                          disabled={isQueued || isSearching}
+                          disabled={isQueued || isSearching || track.status === 'ignored'}
                           className={`shrink-0 transition-colors ${
+                            track.status === 'ignored' ? 'opacity-20 cursor-not-allowed' :
                             isQueued || isSearching ? 'opacity-30 cursor-not-allowed' : 'text-zinc-500 active:text-white'
                           }`}
-                          title={isQueued ? 'Already queued' : 'Auto search'}
+                          title={track.status === 'ignored' ? 'Ignored' : isQueued ? 'Already queued' : 'Auto search'}
                         >
                           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
@@ -312,11 +318,12 @@ export default function AlbumDetail() {
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); startManualSearch(track.id); }}
-                          disabled={manualSearching && isManualOpen}
+                          disabled={(manualSearching && isManualOpen) || track.status === 'ignored'}
                           className={`shrink-0 transition-colors ${
+                            track.status === 'ignored' ? 'opacity-20 cursor-not-allowed' :
                             isManualOpen ? 'text-blue-400' : 'text-zinc-500 active:text-white'
                           }`}
-                          title="Manual search"
+                          title={track.status === 'ignored' ? 'Ignored' : 'Manual search'}
                         >
                           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
@@ -341,9 +348,14 @@ export default function AlbumDetail() {
                       </button>
                     )}
                     <button
-                      onClick={(e) => { e.stopPropagation(); unwatchTrack.mutate(track.id); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`Delete "${track.title}"?`)) {
+                          unwatchTrack.mutate(track.id);
+                        }
+                      }}
                       className="ml-1 text-zinc-600 active:text-red-400 transition-colors shrink-0"
-                      title="Unwatch track"
+                      title="Delete track"
                     >
                       <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M18 6 6 18" /><path d="m6 6 12 12" />

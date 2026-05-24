@@ -158,13 +158,24 @@ func (s *Server) handleBrowseArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	watchedAlbumIDs := []string{}
+	existing, _ := s.queries.FindArtistByProvider(primary, id)
+	if existing != nil {
+		dbAlbums, _ := s.queries.ListAlbumsByArtist(existing.ID)
+		for _, a := range dbAlbums {
+			watchedAlbumIDs = append(watchedAlbumIDs, a.ProviderID)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":          artist.Id,
-		"name":        artist.Name,
-		"image_url":   artist.ImageUrl,
-		"metadata":    artist.Metadata,
-		"album_count": len(albums.Albums),
-		"albums":      albums.Albums,
+		"id":                artist.Id,
+		"name":              artist.Name,
+		"image_url":         artist.ImageUrl,
+		"metadata":          artist.Metadata,
+		"album_count":       len(albums.Albums),
+		"albums":            albums.Albums,
+		"watched_album_ids": watchedAlbumIDs,
+		"artist_watched":    existing != nil && existing.Status == models.ArtistStatusWatched,
 	})
 }
 
@@ -181,7 +192,26 @@ func (s *Server) handleBrowseAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, album)
+	existingAlbum, _ := s.queries.FindAlbumByProvider(primary, id)
+	watchedTrackIDs := []string{}
+	if existingAlbum != nil {
+		tracks, _ := s.queries.ListTracksByAlbum(existingAlbum.ID)
+		for _, t := range tracks {
+			watchedTrackIDs = append(watchedTrackIDs, t.ProviderID)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":                album.Id,
+		"title":             album.Title,
+		"artist_name":       album.ArtistName,
+		"year":              album.Year,
+		"cover_url":         album.CoverUrl,
+		"tracks":            album.Tracks,
+		"metadata":          album.Metadata,
+		"album_watched":     existingAlbum != nil,
+		"watched_track_ids": watchedTrackIDs,
+	})
 }
 
 // Watch

@@ -81,6 +81,8 @@ export interface BrowseArtistResult {
   album_count: number;
   metadata?: Record<string, string>;
   albums: BrowseAlbumResult[];
+  watched_album_ids?: string[];
+  artist_watched?: boolean;
 }
 
 export interface BrowseAlbumResult {
@@ -101,6 +103,8 @@ export interface BrowseAlbumDetail {
   artist_name: string;
   tracks: BrowseTrackResult[];
   metadata?: Record<string, string>;
+  album_watched?: boolean;
+  watched_track_ids?: string[];
 }
 
 export interface BrowseTrackResult {

@@ -13,7 +13,7 @@ export default function BrowseAlbum() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [watchedTracks, setWatchedTracks] = useState<Set<string>>(new Set());
+  const [localWatchedTracks, setLocalWatchedTracks] = useState<Set<string>>(new Set());
 
   const artistID = searchParams.get('artist_id') || '';
   const artistName = searchParams.get('artist_name') || '';
@@ -58,7 +58,7 @@ export default function BrowseAlbum() {
         provider: providerOverride,
       }),
     onSuccess: (_data, track) => {
-      setWatchedTracks((prev) => new Set(prev).add(track.id));
+      setLocalWatchedTracks((prev) => new Set(prev).add(track.id));
       queryClient.invalidateQueries({ queryKey: ['artists'] });
     },
     onError: (err: Error) => toast(err.message, 'error'),
@@ -110,10 +110,14 @@ export default function BrowseAlbum() {
 
       <button
         onClick={() => watchAlbum.mutate()}
-        disabled={watchAlbum.isPending || watchAlbum.isSuccess}
-        className="w-full mb-4 py-2.5 bg-white text-zinc-900 rounded-lg font-semibold text-sm active:scale-[0.98] transition-transform disabled:opacity-50"
+        disabled={watchAlbum.isPending || watchAlbum.isSuccess || album.album_watched}
+        className={`w-full mb-4 py-2.5 rounded-lg font-semibold text-sm transition-transform disabled:opacity-50 ${
+          album.album_watched || watchAlbum.isSuccess
+            ? 'bg-green-900/50 text-green-400'
+            : 'bg-white text-zinc-900 active:scale-[0.98]'
+        }`}
       >
-        {watchAlbum.isSuccess ? 'Watching Album' : watchAlbum.isPending ? 'Adding...' : 'Watch Entire Album'}
+        {album.album_watched ? '✓ Watching Album' : watchAlbum.isSuccess ? '✓ Watching Album' : watchAlbum.isPending ? 'Adding...' : 'Watch Entire Album'}
       </button>
 
       {album.tracks && album.tracks.length > 0 && (
@@ -121,7 +125,8 @@ export default function BrowseAlbum() {
           <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Tracks</p>
           <div className="rounded-lg overflow-hidden">
             {album.tracks.map((track) => {
-              const isWatched = watchedTracks.has(track.id);
+              const serverWatched = album.watched_track_ids?.includes(track.id);
+              const isWatched = serverWatched || localWatchedTracks.has(track.id);
               return (
                 <div
                   key={track.id}
@@ -134,19 +139,18 @@ export default function BrowseAlbum() {
                     <p className="text-sm truncate">{track.title}</p>
                     <p className="text-[11px] text-zinc-600 tabular-nums">{formatDuration(track.duration_ms)}</p>
                   </div>
-                  <button
-                    onClick={() => {
-                      if (!isWatched) watchTrack.mutate(track);
-                    }}
-                    disabled={isWatched}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors shrink-0 ${
-                      isWatched
-                        ? 'bg-green-900/50 text-green-400'
-                        : 'bg-zinc-700 text-zinc-200 active:bg-zinc-600'
-                    }`}
-                  >
-                    {isWatched ? '✓' : 'Watch'}
-                  </button>
+                  {isWatched ? (
+                    <svg className="w-5 h-5 text-green-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : (
+                    <button
+                      onClick={() => watchTrack.mutate(track)}
+                      className="px-2.5 py-1 rounded text-xs font-medium transition-colors shrink-0 bg-zinc-700 text-zinc-200 active:bg-zinc-600"
+                    >
+                      Watch
+                    </button>
+                  )}
                 </div>
               );
             })}

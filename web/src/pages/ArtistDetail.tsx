@@ -91,8 +91,8 @@ export default function ArtistDetail() {
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
-  const handleUnwatch = () => {
-    if (confirm(`Stop watching ${artist?.name}? This removes all their albums and tracks.`)) {
+  const handleDelete = () => {
+    if (confirm(`Delete ${artist?.name}? This removes all their albums and tracks from your library.`)) {
       unwatch.mutate();
     }
   };
@@ -204,11 +204,11 @@ export default function ArtistDetail() {
             </svg>
           </button>
           <button
-            onClick={handleUnwatch}
+            onClick={handleDelete}
             disabled={unwatch.isPending}
             className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 active:bg-red-900/40 active:text-red-400 transition-colors"
           >
-            Unwatch
+            Delete
           </button>
         </div>
       </div>

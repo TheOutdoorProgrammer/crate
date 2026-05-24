@@ -13,7 +13,7 @@ export default function BrowseArtist() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [watchNewReleases, setWatchNewReleases] = useState(false);
-  const [watchedAlbums, setWatchedAlbums] = useState<Set<string>>(new Set());
+  const [localWatchedAlbums, setLocalWatchedAlbums] = useState<Set<string>>(new Set());
   const [trackFilter, setTrackFilter] = useState('');
   const [debouncedFilter, setDebouncedFilter] = useState('');
 
@@ -43,7 +43,7 @@ export default function BrowseArtist() {
         provider: providerOverride,
       }),
     onSuccess: (_data, albumID) => {
-      setWatchedAlbums((prev) => new Set(prev).add(albumID));
+      setLocalWatchedAlbums((prev) => new Set(prev).add(albumID));
       queryClient.invalidateQueries({ queryKey: ['artists'] });
     },
     onError: (err: Error) => toast(err.message, 'error'),
@@ -140,10 +140,14 @@ export default function BrowseArtist() {
 
       <button
         onClick={() => watchArtist.mutate()}
-        disabled={watchArtist.isPending || watchArtist.isSuccess}
-        className="w-full mb-4 py-2.5 bg-white text-zinc-900 rounded-lg font-semibold text-sm active:scale-[0.98] transition-transform disabled:opacity-50"
+        disabled={watchArtist.isPending || watchArtist.isSuccess || artist.artist_watched}
+        className={`w-full mb-4 py-2.5 rounded-lg font-semibold text-sm transition-transform disabled:opacity-50 ${
+          artist.artist_watched || watchArtist.isSuccess
+            ? 'bg-green-900/50 text-green-400'
+            : 'bg-white text-zinc-900 active:scale-[0.98]'
+        }`}
       >
-        {watchArtist.isSuccess ? 'Watching All' : watchArtist.isPending ? 'Adding...' : 'Watch All Albums'}
+        {artist.artist_watched ? '✓ Watching All' : watchArtist.isSuccess ? '✓ Watching All' : watchArtist.isPending ? 'Adding...' : 'Watch All Albums'}
       </button>
 
       {artist.albums && artist.albums.length > 0 && (
@@ -163,7 +167,8 @@ export default function BrowseArtist() {
           )}
           <div className="space-y-1">
             {filteredAlbums.map((album) => {
-              const isWatched = watchedAlbums.has(album.id);
+              const serverWatched = artist.watched_album_ids?.includes(album.id);
+              const isWatched = serverWatched || localWatchedAlbums.has(album.id);
               return (
                 <div
                   key={album.id}
@@ -196,20 +201,21 @@ export default function BrowseArtist() {
                       </div>
                     </div>
                   </Link>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!isWatched) watchAlbum.mutate(album.id);
-                    }}
-                    disabled={isWatched}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors shrink-0 ${
-                      isWatched
-                        ? 'bg-green-900/50 text-green-400'
-                        : 'bg-zinc-700 text-zinc-200 active:bg-zinc-600'
-                    }`}
-                  >
-                    {isWatched ? '✓' : 'Watch'}
-                  </button>
+                  {isWatched ? (
+                    <svg className="w-5 h-5 text-green-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        watchAlbum.mutate(album.id);
+                      }}
+                      className="px-2.5 py-1 rounded text-xs font-medium transition-colors shrink-0 bg-zinc-700 text-zinc-200 active:bg-zinc-600"
+                    >
+                      Watch
+                    </button>
+                  )}
                 </div>
               );
             })}
