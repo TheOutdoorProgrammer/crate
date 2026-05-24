@@ -234,9 +234,8 @@ func (s *Service) checkSearch(ctx context.Context, d models.DownloadQueueItem) e
 	}
 
 	if !search.IsComplete {
-		searchAge := time.Since(mustParseTime(d.CreatedAt))
-		if searchAge < 60*time.Second {
-			return s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusSearching, d.SlskdSearchID, nil)
+		if d.LastAttempt != nil && time.Since(mustParseTime(*d.LastAttempt)) < 5*time.Minute {
+			return nil
 		}
 	}
 
