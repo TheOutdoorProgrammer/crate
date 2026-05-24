@@ -774,7 +774,7 @@
       <p>Crate includes a Lidarr v1 API compatibility shim at <code>/api/v1/</code>, allowing iOS and Android apps built for Lidarr to manage your Crate library. No extra configuration needed &mdash; point the app at your Crate URL with any API key and it works.</p>
 
       <div class="callout">
-        <strong>Tested with:</strong> <a href="https://apps.apple.com/us/app/helmarr/id1638624921">Helmarr</a> (iOS) &mdash; full artist/album management, search, monitoring, and interactive search all work out of the box.
+        <strong>Tested with:</strong> <a href="https://apps.apple.com/us/app/helmarr/id1638624921">Helmarr</a> (iOS) &mdash; full artist/album management, search, and monitoring all work out of the box. Interactive search is not supported &mdash; use the Crate UI for manual file selection.
       </div>
 
       <h3>Concept Mapping</h3>
@@ -836,11 +836,6 @@
               <td>Same as searching from the album page.</td>
             </tr>
             <tr>
-              <td>Interactive search</td>
-              <td>Manual search</td>
-              <td>Browse slskd results, pick a specific file to download.</td>
-            </tr>
-            <tr>
               <td>"Search for missing" on add</td>
               <td>Auto-queue after watch</td>
               <td>Queues all wanted tracks immediately when enabled.</td>
@@ -858,7 +853,7 @@
         <li><strong>Artists</strong> &mdash; search, lookup, add (with monitoring strategy), list, get, delete</li>
         <li><strong>Albums</strong> &mdash; list, delete, monitor/unmonitor toggle (with track status cascade)</li>
         <li><strong>Tracks</strong> &mdash; list tracks for an album</li>
-        <li><strong>Downloads</strong> &mdash; queue status, interactive search (release endpoint)</li>
+        <li><strong>Downloads</strong> &mdash; queue status</li>
         <li><strong>Commands</strong> &mdash; ArtistSearch, AlbumSearch</li>
       </ul>
 

@@ -20,4 +20,5 @@ cmd/crate/dist/
 
 .env
 config/slskd.yml
+slskd/
 .DS_Store

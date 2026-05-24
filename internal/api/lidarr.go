@@ -61,7 +61,8 @@ func (s *Server) mountLidarrRoutes(r chi.Router) {
 		r.Get("/calendar", s.lidarrCalendar)
 		r.Get("/history", s.lidarrHistory)
 
-		r.Get("/release", s.lidarrRelease)
+		r.Get("/release", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, []any{}) })
+		r.Post("/release", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, []any{}) })
 
 		r.Post("/command", s.lidarrCommand)
 
@@ -123,11 +124,11 @@ func (s *Server) lidarrSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"isOsx":                  runtime.GOOS == "darwin",
 		"isWindows":              runtime.GOOS == "windows",
 		"isDocker":               false,
-		"mode":                   0,
+		"mode":                   "console",
 		"branch":                 "main",
-		"databaseType":           0,
+		"databaseType":           "sqLite",
 		"databaseVersion":        "3.0.0",
-		"authentication":         0,
+		"authentication":         "none",
 		"migrationVersion":       0,
 		"urlBase":                "",
 		"runtimeVersion":         runtime.Version(),
@@ -135,7 +136,7 @@ func (s *Server) lidarrSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"startTime":              s.startTime.Format(time.RFC3339),
 		"packageVersion":         "2.8.1.4731",
 		"packageAuthor":          "crate",
-		"packageUpdateMechanism": 0,
+		"packageUpdateMechanism": "docker",
 	})
 }
 
@@ -878,82 +879,27 @@ func (s *Server) lidarrQueueAlbumDownloads(albumID int64) {
 
 // Release (interactive search)
 
-func (s *Server) lidarrRelease(w http.ResponseWriter, r *http.Request) {
-	artistIDStr := r.URL.Query().Get("artistId")
-	albumIDStr := r.URL.Query().Get("albumId")
-
-	var trackIDs []int64
-
-	if albumIDStr != "" {
-		albumID, err := strconv.ParseInt(albumIDStr, 10, 64)
-		if err == nil {
-			tracks, _ := s.queries.ListWantedTracksByAlbum(albumID)
-			for _, t := range tracks {
-				trackIDs = append(trackIDs, t.ID)
-			}
-		}
-	} else if artistIDStr != "" {
-		artistID, err := strconv.ParseInt(artistIDStr, 10, 64)
-		if err == nil {
-			tracks, _ := s.queries.ListWantedTracksByArtist(artistID)
-			for _, t := range tracks {
-				trackIDs = append(trackIDs, t.ID)
-			}
-		}
-	}
-
-	if len(trackIDs) == 0 {
-		writeJSON(w, http.StatusOK, []any{})
-		return
-	}
-
-	// Search for the first wanted track as a representative result set
-	results, err := s.downloader.ManualSearch(r.Context(), trackIDs[0])
-	if err != nil {
-		writeJSON(w, http.StatusOK, []any{})
-		return
-	}
-
-	var releases []map[string]any
-	for i, res := range results {
-		releases = append(releases, map[string]any{
-			"id":                i + 1,
-			"guid":              fmt.Sprintf("crate-%d-%d", trackIDs[0], i),
-			"quality":           map[string]any{"quality": map[string]any{"id": 1, "name": "FLAC"}, "revision": map[string]any{"version": 1}},
-			"age":               0,
-			"ageHours":          0.0,
-			"ageMinutes":        0.0,
-			"size":              res.Size,
-			"title":             res.Filename,
-			"indexer":           "slskd",
-			"indexerId":         1,
-			"seeders":           1,
-			"leechers":          0,
-			"protocol":          "peer",
-			"downloadAllowed":   true,
-			"rejected":          false,
-			"rejections":        []any{},
-			"downloadUrl":       fmt.Sprintf("%s@%s", res.Username, res.Filename),
-			"infoUrl":           "",
-			"magnetUrl":         "",
-			"customFormats":     []any{},
-			"customFormatScore": 0,
-		})
-	}
-	if releases == nil {
-		releases = []map[string]any{}
-	}
-	writeJSON(w, http.StatusOK, releases)
-}
-
 // Translation helpers
 
 func (s *Server) artistToLidarr(a *models.Artist) map[string]any {
-	totalTracks := a.TotalTracks
-	ownedTracks := a.OwnedTracks
-	albumCount := len(a.Albums)
+	var totalTracks, ownedTracks, albumCount int
 
-	if albumCount == 0 {
+	if len(a.Albums) > 0 {
+		albumCount = len(a.Albums)
+		for _, al := range a.Albums {
+			totalTracks += len(al.Tracks)
+			for _, t := range al.Tracks {
+				if t.Status == models.TrackStatusOwned {
+					ownedTracks++
+				}
+			}
+		}
+	} else if a.TotalTracks > 0 {
+		totalTracks = a.TotalTracks
+		ownedTracks = a.OwnedTracks
+		albums, _ := s.queries.ListAlbumsByArtist(a.ID)
+		albumCount = len(albums)
+	} else {
 		albums, _ := s.queries.ListAlbumsByArtist(a.ID)
 		albumCount = len(albums)
 		for _, al := range albums {

@@ -136,6 +136,10 @@ Tests live in:
 
 The `testEnv` helper in handlers_test.go wires up real in-memory SQLite, a fake gRPC provider, fake slskd, and an in-memory activity log. Use `newTestEnv(t)` and call `env.do(method, path, body)`. The fake provider returns canned data for artist "1000" with two albums and three tracks.
 
+## Lidarr API Shim
+
+The Lidarr v1 API compatibility shim lives entirely in `internal/api/lidarr.go` (+ `lidarr_test.go`). **Crate is never changed to accommodate Lidarr.** All translation between Lidarr concepts and Crate internals happens inside `lidarr.go`. If Lidarr needs something Crate doesn't expose, the shim adapts — we do not add fields, endpoints, or behaviors to Crate's core code to make Lidarr work. Lidarr compatibility is a convenience, not a requirement.
+
 ## Lessons learned
 
 - **Always add tests for new features.** Run `go test ./...` before pushing. CI gates on this.

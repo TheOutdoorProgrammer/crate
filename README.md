@@ -107,12 +107,11 @@ Lidarr and Crate model things differently. The shim translates between them:
 | Unmonitored album | Album status `ignored` | Tracks cascade to `ignored` (preserves `owned`/`downloading`) |
 | ArtistSearch command | Queue all wanted tracks | Same as "Search wanted tracks" in the UI |
 | AlbumSearch command | Queue album's wanted tracks | Same as "Search wanted tracks" on the album page |
-| Interactive search | Manual search | Browse slskd results, pick a specific file |
 | "Search for missing albums" on add | Auto-queue after watch | Queues all wanted tracks immediately |
 
 ### Supported endpoints
 
-System status, health, disk space, quality/metadata profiles, root folders, custom filters, calendar, history, wanted/missing, queue, search, artist CRUD, album CRUD (including monitor toggle), track listing, release (interactive search), and commands (ArtistSearch, AlbumSearch).
+System status, health, disk space, quality/metadata profiles, root folders, custom filters, calendar, history, wanted/missing, queue, search, artist CRUD, album CRUD (including monitor toggle), track listing, and commands (ArtistSearch, AlbumSearch). Interactive search is not supported -- use the Crate UI for manual file selection.
 
 ### Auth
 
@@ -120,7 +119,7 @@ The shim accepts any API key in the `X-Api-Key` header or `apikey` query paramet
 
 ### Tested with
 
-- [Helmarr](https://apps.apple.com/us/app/helmarr/id1638624921) (iOS) -- full artist/album management, search, monitoring, interactive search
+- [Helmarr](https://apps.apple.com/us/app/helmarr/id1638624921) (iOS) -- full artist/album management, search, monitoring
 
 Contributions to expand Lidarr API coverage are welcome.
 
