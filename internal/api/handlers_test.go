@@ -1385,7 +1385,7 @@ func TestClearDownloadsByStatus(t *testing.T) {
 
 func TestClearDownloadsBadStatus(t *testing.T) {
 	env := newTestEnv(t)
-	w := env.do("DELETE", "/api/downloads/clear?status=downloading", "")
+	w := env.do("DELETE", "/api/downloads/clear?status=bogus", "")
 	if w.Code != 400 {
 		t.Errorf("expected 400 for invalid clear status, got %d", w.Code)
 	}

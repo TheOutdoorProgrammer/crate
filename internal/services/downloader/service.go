@@ -17,6 +17,7 @@ import (
 )
 
 const defaultMaxConcurrentSlskd = 10
+const staleDownloadTimeout = 5 * time.Minute
 
 var supportedExts = map[string]bool{
 	".flac": true,
@@ -341,8 +342,23 @@ func (s *Service) checkDownload(ctx context.Context, d models.DownloadQueueItem)
 		return s.failWithRetry(d, "transfer failed: "+state)
 	}
 
-	// Still in progress — bump attempts counter to track time
-	return s.queries.UpdateDownloadStatus(d.ID, models.DownloadStatusDownloading, d.SlskdSearchID, nil)
+	// Check for stale transfers — no progress for too long means peer is gone
+	if transfer.BytesTransferred > d.LastProgressBytes {
+		_ = s.queries.UpdateDownloadProgress(d.ID, transfer.BytesTransferred)
+		return nil
+	}
+	if d.LastAttempt != nil {
+		lastProgress := mustParseTime(*d.LastAttempt)
+		if !lastProgress.IsZero() && time.Since(lastProgress) > staleDownloadTimeout {
+			_ = s.queries.UpdateTrackStatus(d.TrackID, models.TrackStatusWanted)
+			_ = s.queries.BlacklistFile(username, transfer.Filename, "stale transfer: no progress for "+staleDownloadTimeout.String())
+			slog.Info("downloader: stale transfer, blacklisting", "username", username, "filename", filepath.Base(transfer.Filename), "download_id", d.ID)
+			s.logActivity("download_failed", "track", d.TrackID,
+				fmt.Sprintf("Stale transfer (no progress for %s) from %s (blacklisted)", staleDownloadTimeout, username))
+			return s.failWithRetry(d, "stale transfer: no progress for "+staleDownloadTimeout.String())
+		}
+	}
+	return nil
 }
 
 // retryOrganize is called for downloads stuck in "organizing" (e.g. after a crash).
@@ -500,7 +516,6 @@ func (s *Service) ManualDownload(ctx context.Context, trackID int64, username, f
 
 func scoreAllFiles(results []slskd.SearchResult, track *models.Track, bl blacklistChecker) []ManualSearchResult {
 	titleLower := strings.ToLower(track.Title)
-	artistLower := strings.ToLower(track.ArtistName)
 
 	var scored []ManualSearchResult
 
@@ -510,7 +525,7 @@ func scoreAllFiles(results []slskd.SearchResult, track *models.Track, bl blackli
 				continue
 			}
 			nameLower := strings.ToLower(f.Filename)
-			if !strings.Contains(nameLower, artistLower) && !strings.Contains(nameLower, titleLower) {
+			if !strings.Contains(nameLower, titleLower) {
 				continue
 			}
 
@@ -622,7 +637,6 @@ func pickBestFile(results []slskd.SearchResult, track *models.Track, bl blacklis
 	var best *candidate
 
 	titleLower := strings.ToLower(track.Title)
-	artistLower := strings.ToLower(track.ArtistName)
 
 	for _, result := range results {
 		for _, f := range result.Files {
@@ -634,8 +648,7 @@ func pickBestFile(results []slskd.SearchResult, track *models.Track, bl blacklis
 			}
 			nameLower := strings.ToLower(f.Filename)
 
-			// Must contain artist and title (loose match)
-			if !strings.Contains(nameLower, artistLower) && !strings.Contains(nameLower, titleLower) {
+			if !strings.Contains(nameLower, titleLower) {
 				continue
 			}
 
@@ -667,8 +680,12 @@ func pickBestFile(results []slskd.SearchResult, track *models.Track, bl blacklis
 }
 
 func inferExt(nameLower string) string {
+	basename := nameLower
+	if idx := strings.LastIndexAny(nameLower, `/\`); idx >= 0 {
+		basename = nameLower[idx+1:]
+	}
 	for ext := range supportedExts {
-		if strings.Contains(nameLower, ext) {
+		if strings.HasSuffix(basename, ext) {
 			return ext
 		}
 	}

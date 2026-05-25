@@ -96,17 +96,18 @@ type QualityTier struct {
 }
 
 type DownloadQueueItem struct {
-	ID            int64          `json:"id" db:"id"`
-	TrackID       int64          `json:"track_id" db:"track_id"`
-	SlskdSearchID *string        `json:"slskd_search_id,omitempty" db:"slskd_search_id"`
-	Status        DownloadStatus `json:"status" db:"status"`
-	Attempts      int            `json:"attempts" db:"attempts"`
-	LastAttempt   *string        `json:"last_attempt,omitempty" db:"last_attempt"`
-	Error         *string        `json:"error,omitempty" db:"error"`
-	NextRetryAt   *string        `json:"next_retry_at,omitempty" db:"next_retry_at"`
-	Source        string         `json:"source" db:"source"`
-	CreatedAt     string         `json:"created_at" db:"created_at"`
-	Track         *Track         `json:"track,omitempty"`
+	ID                int64          `json:"id" db:"id"`
+	TrackID           int64          `json:"track_id" db:"track_id"`
+	SlskdSearchID     *string        `json:"slskd_search_id,omitempty" db:"slskd_search_id"`
+	Status            DownloadStatus `json:"status" db:"status"`
+	Attempts          int            `json:"attempts" db:"attempts"`
+	LastAttempt       *string        `json:"last_attempt,omitempty" db:"last_attempt"`
+	Error             *string        `json:"error,omitempty" db:"error"`
+	NextRetryAt       *string        `json:"next_retry_at,omitempty" db:"next_retry_at"`
+	Source            string         `json:"source" db:"source"`
+	LastProgressBytes int64          `json:"last_progress_bytes" db:"last_progress_bytes"`
+	CreatedAt         string         `json:"created_at" db:"created_at"`
+	Track             *Track         `json:"track,omitempty"`
 }
 
 type ActivityLog struct {

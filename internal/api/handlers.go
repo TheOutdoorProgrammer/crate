@@ -842,9 +842,17 @@ func (s *Server) handleDeleteDownload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	dl, err := s.queries.GetDownload(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "download not found")
+		return
+	}
 	if err := s.queries.DeleteDownload(id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete download")
 		return
+	}
+	if dl.Status == models.DownloadStatusDownloading || dl.Status == models.DownloadStatusSearching || dl.Status == models.DownloadStatusPending {
+		_ = s.queries.UpdateTrackStatus(dl.TrackID, models.TrackStatusWanted)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -855,10 +863,14 @@ func (s *Server) handleClearDownloadsByStatus(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "status parameter required")
 		return
 	}
-	allowed := map[string]bool{"failed": true, "complete": true, "pending": true}
+	allowed := map[string]bool{"failed": true, "complete": true, "pending": true, "downloading": true, "searching": true}
 	if !allowed[status] {
-		writeError(w, http.StatusBadRequest, "can only clear failed, complete, or pending downloads")
+		writeError(w, http.StatusBadRequest, "can only clear failed, complete, pending, downloading, or searching downloads")
 		return
+	}
+	resetTrack := status == "downloading" || status == "searching" || status == "pending"
+	if resetTrack {
+		s.queries.ResetTrackStatusForDownloads(status)
 	}
 	deleted, err := s.queries.DeleteDownloadsByStatus(status)
 	if err != nil {

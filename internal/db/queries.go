@@ -579,7 +579,7 @@ func (q *Queries) EnqueueDownloadReturningID(trackID int64) (int64, error) {
 }
 
 func (q *Queries) ListDownloads(status string) ([]models.DownloadQueueItem, error) {
-	query := `SELECT d.id, d.track_id, d.slskd_search_id, d.status, d.attempts, d.last_attempt, d.error, d.next_retry_at, d.source, d.created_at
+	query := `SELECT d.id, d.track_id, d.slskd_search_id, d.status, d.attempts, d.last_attempt, d.error, d.next_retry_at, d.source, d.last_progress_bytes, d.created_at
 		 FROM download_queue d`
 	var args []any
 	if status != "" {
@@ -598,7 +598,7 @@ func (q *Queries) ListDownloads(status string) ([]models.DownloadQueueItem, erro
 	for rows.Next() {
 		var d models.DownloadQueueItem
 		if err := rows.Scan(&d.ID, &d.TrackID, &d.SlskdSearchID, &d.Status, &d.Attempts,
-			&d.LastAttempt, &d.Error, &d.NextRetryAt, &d.Source, &d.CreatedAt); err != nil {
+			&d.LastAttempt, &d.Error, &d.NextRetryAt, &d.Source, &d.LastProgressBytes, &d.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, d)
@@ -607,7 +607,7 @@ func (q *Queries) ListDownloads(status string) ([]models.DownloadQueueItem, erro
 }
 
 func (q *Queries) ListDownloadsWithTrack(status string) ([]models.DownloadQueueItem, error) {
-	query := `SELECT d.id, d.track_id, d.slskd_search_id, d.status, d.attempts, d.last_attempt, d.error, d.next_retry_at, d.source, d.created_at,
+	query := `SELECT d.id, d.track_id, d.slskd_search_id, d.status, d.attempts, d.last_attempt, d.error, d.next_retry_at, d.source, d.last_progress_bytes, d.created_at,
 		        t.title, ar.name, al.title
 		 FROM download_queue d
 		 JOIN tracks t ON t.id = d.track_id
@@ -631,7 +631,7 @@ func (q *Queries) ListDownloadsWithTrack(status string) ([]models.DownloadQueueI
 		var d models.DownloadQueueItem
 		var trackTitle, artistName, albumTitle string
 		if err := rows.Scan(&d.ID, &d.TrackID, &d.SlskdSearchID, &d.Status, &d.Attempts,
-			&d.LastAttempt, &d.Error, &d.NextRetryAt, &d.Source, &d.CreatedAt,
+			&d.LastAttempt, &d.Error, &d.NextRetryAt, &d.Source, &d.LastProgressBytes, &d.CreatedAt,
 			&trackTitle, &artistName, &albumTitle); err != nil {
 			return nil, err
 		}
@@ -683,6 +683,18 @@ func (q *Queries) CountActiveDownloads() (int, error) {
 	return count, err
 }
 
+func (q *Queries) GetDownload(id int64) (*models.DownloadQueueItem, error) {
+	var d models.DownloadQueueItem
+	err := q.db.QueryRow(
+		`SELECT id, track_id, slskd_search_id, status, attempts, last_attempt, error, next_retry_at, source, last_progress_bytes, created_at
+		 FROM download_queue WHERE id = ?`, id,
+	).Scan(&d.ID, &d.TrackID, &d.SlskdSearchID, &d.Status, &d.Attempts, &d.LastAttempt, &d.Error, &d.NextRetryAt, &d.Source, &d.LastProgressBytes, &d.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
 func (q *Queries) DeleteDownload(id int64) error {
 	_, err := q.db.Exec(`DELETE FROM download_queue WHERE id = ?`, id)
 	return err
@@ -696,6 +708,14 @@ func (q *Queries) DeleteDownloadsByStatus(status string) (int64, error) {
 	return result.RowsAffected()
 }
 
+func (q *Queries) ResetTrackStatusForDownloads(downloadStatus string) {
+	q.db.Exec(
+		`UPDATE tracks SET status = 'wanted' WHERE id IN (
+			SELECT track_id FROM download_queue WHERE status = ?
+		) AND status = 'downloading'`, downloadStatus,
+	)
+}
+
 func (q *Queries) UpdateDownloadStatus(id int64, status models.DownloadStatus, searchID *string, err *string) error {
 	_, e := q.db.Exec(
 		`UPDATE download_queue SET status = ?, slskd_search_id = COALESCE(?, slskd_search_id),
@@ -703,6 +723,14 @@ func (q *Queries) UpdateDownloadStatus(id int64, status models.DownloadStatus, s
 		status, searchID, err, now(), id,
 	)
 	return e
+}
+
+func (q *Queries) UpdateDownloadProgress(id int64, bytesTransferred int64) error {
+	_, err := q.db.Exec(
+		`UPDATE download_queue SET last_progress_bytes = ?, last_attempt = ? WHERE id = ?`,
+		bytesTransferred, now(), id,
+	)
+	return err
 }
 
 func (q *Queries) ScheduleRetry(id int64, retryAt string, errMsg string) error {
@@ -716,7 +744,7 @@ func (q *Queries) ScheduleRetry(id int64, retryAt string, errMsg string) error {
 
 func (q *Queries) ListRetryableDownloads() ([]models.DownloadQueueItem, error) {
 	rows, err := q.db.Query(
-		`SELECT id, track_id, slskd_search_id, status, attempts, last_attempt, error, next_retry_at, source, created_at
+		`SELECT id, track_id, slskd_search_id, status, attempts, last_attempt, error, next_retry_at, source, last_progress_bytes, created_at
 		 FROM download_queue
 		 WHERE status = 'failed' AND next_retry_at IS NOT NULL AND next_retry_at <= ?
 		 ORDER BY next_retry_at`, now(),
@@ -730,7 +758,7 @@ func (q *Queries) ListRetryableDownloads() ([]models.DownloadQueueItem, error) {
 	for rows.Next() {
 		var d models.DownloadQueueItem
 		if err := rows.Scan(&d.ID, &d.TrackID, &d.SlskdSearchID, &d.Status, &d.Attempts,
-			&d.LastAttempt, &d.Error, &d.NextRetryAt, &d.Source, &d.CreatedAt); err != nil {
+			&d.LastAttempt, &d.Error, &d.NextRetryAt, &d.Source, &d.LastProgressBytes, &d.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, d)
