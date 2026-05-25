@@ -516,6 +516,7 @@ func (s *Service) ManualDownload(ctx context.Context, trackID int64, username, f
 
 func scoreAllFiles(results []slskd.SearchResult, track *models.Track, bl blacklistChecker) []ManualSearchResult {
 	titleLower := strings.ToLower(track.Title)
+	artistLower := strings.ToLower(track.ArtistName)
 
 	var scored []ManualSearchResult
 
@@ -541,6 +542,9 @@ func scoreAllFiles(results []slskd.SearchResult, track *models.Track, bl blackli
 			}
 
 			score := formatScore(ext, f.BitRate)
+			if strings.Contains(nameLower, artistLower) {
+				score += 30
+			}
 			if result.HasFreeUploadSlot {
 				score += 20
 			}
@@ -637,6 +641,7 @@ func pickBestFile(results []slskd.SearchResult, track *models.Track, bl blacklis
 	var best *candidate
 
 	titleLower := strings.ToLower(track.Title)
+	artistLower := strings.ToLower(track.ArtistName)
 
 	for _, result := range results {
 		for _, f := range result.Files {
@@ -664,6 +669,9 @@ func pickBestFile(results []slskd.SearchResult, track *models.Track, bl blacklis
 			}
 
 			score := formatScore(ext, f.BitRate)
+			if strings.Contains(nameLower, artistLower) {
+				score += 30
+			}
 			if result.HasFreeUploadSlot {
 				score += 20
 			}
