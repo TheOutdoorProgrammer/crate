@@ -458,6 +458,86 @@ func TestWatchArtistIdempotentForFullWatch(t *testing.T) {
 	}
 }
 
+func TestReWatchArtistSyncsMissingTracks(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+
+	// Find album with 2 tracks and delete one
+	var targetAlbum *models.Album
+	for i := range albums {
+		tracks, _ := env.queries.ListTracksByAlbum(albums[i].ID)
+		if len(tracks) == 2 {
+			targetAlbum = &albums[i]
+			// Delete the second track to simulate a missing track
+			env.queries.DeleteTrack(tracks[1].ID)
+			break
+		}
+	}
+	if targetAlbum == nil {
+		t.Fatal("expected an album with 2 tracks")
+	}
+
+	// Verify track is gone
+	tracksAfterDelete, _ := env.queries.ListTracksByAlbum(targetAlbum.ID)
+	if len(tracksAfterDelete) != 1 {
+		t.Fatalf("expected 1 track after delete, got %d", len(tracksAfterDelete))
+	}
+
+	// Re-watch the artist
+	w := env.do("POST", "/api/watch/artist/1000", `{}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 on re-watch, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify the missing track was re-added
+	tracksAfterSync, _ := env.queries.ListTracksByAlbum(targetAlbum.ID)
+	if len(tracksAfterSync) != 2 {
+		t.Fatalf("expected 2 tracks after re-watch sync, got %d", len(tracksAfterSync))
+	}
+
+	// Verify no duplicate artists or albums
+	allArtists, _ := env.queries.ListArtists()
+	if len(allArtists) != 1 {
+		t.Errorf("expected 1 artist, got %d", len(allArtists))
+	}
+	allAlbums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	if len(allAlbums) != 2 {
+		t.Errorf("expected 2 albums, got %d", len(allAlbums))
+	}
+}
+
+func TestReWatchArtistSkipsIgnoredAlbums(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+
+	// Ignore the first album and delete its tracks
+	env.do("PUT", fmt.Sprintf("/api/albums/%d/ignore", albums[0].ID), ``)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+	for _, tr := range tracks {
+		env.queries.DeleteTrack(tr.ID)
+	}
+
+	// Re-watch the artist
+	w := env.do("POST", "/api/watch/artist/1000", `{}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Ignored album should NOT get tracks re-added
+	tracksAfterSync, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+	if len(tracksAfterSync) != 0 {
+		t.Errorf("expected 0 tracks for ignored album, got %d", len(tracksAfterSync))
+	}
+}
+
 func TestWatchAllAlbumsForPartialArtist(t *testing.T) {
 	env := newTestEnv(t)
 

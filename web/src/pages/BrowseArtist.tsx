@@ -140,14 +140,14 @@ export default function BrowseArtist() {
 
       <button
         onClick={() => watchArtist.mutate()}
-        disabled={watchArtist.isPending || watchArtist.isSuccess || artist.artist_watched}
+        disabled={watchArtist.isPending}
         className={`w-full mb-4 py-2.5 rounded-lg font-semibold text-sm transition-transform disabled:opacity-50 ${
           artist.artist_watched || watchArtist.isSuccess
-            ? 'bg-green-900/50 text-green-400'
+            ? 'bg-green-900/50 text-green-400 active:scale-[0.98]'
             : 'bg-white text-zinc-900 active:scale-[0.98]'
         }`}
       >
-        {artist.artist_watched ? '✓ Watching All' : watchArtist.isSuccess ? '✓ Watching All' : watchArtist.isPending ? 'Adding...' : 'Watch All Albums'}
+        {watchArtist.isPending ? 'Adding...' : artist.artist_watched || watchArtist.isSuccess ? '✓ Watching All' : 'Watch All Albums'}
       </button>
 
       {artist.albums && artist.albums.length > 0 && (

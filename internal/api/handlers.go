@@ -231,11 +231,7 @@ func (s *Server) handleWatchArtist(w http.ResponseWriter, r *http.Request) {
 		primary = s.providers.Primary()
 	}
 
-	existing, err := s.queries.FindArtistByProvider(primary, providerID)
-	if err == nil && existing != nil && existing.Status == models.ArtistStatusWatched {
-		writeJSON(w, http.StatusOK, existing)
-		return
-	}
+	existing, _ := s.queries.FindArtistByProvider(primary, providerID)
 
 	artistDetail, err := s.providers.GetArtist(r.Context(), primary, providerID)
 	if err != nil {
@@ -304,9 +300,34 @@ func (s *Server) saveAlbumsFromProvider(providerName string, artistID int64, alb
 	ctx := context.Background()
 	for _, pa := range albums {
 		if existingAlbum, _ := s.queries.FindAlbumByProvider(providerName, pa.Id); existingAlbum != nil {
+			if existingAlbum.Status != models.AlbumStatusIgnored {
+				s.syncAlbumTracks(ctx, providerName, existingAlbum)
+			}
 			continue
 		}
 		s.saveAlbumFromProvider(ctx, providerName, artistID, pa)
+	}
+}
+
+func (s *Server) syncAlbumTracks(ctx context.Context, providerName string, album *models.Album) {
+	albumDetail, err := s.providers.GetAlbum(ctx, providerName, album.ProviderID)
+	if err != nil {
+		return
+	}
+	for _, pt := range albumDetail.Tracks {
+		if _, err := s.queries.FindTrackByProvider(providerName, pt.Id); err == nil {
+			continue
+		}
+		s.queries.CreateTrack(&models.Track{
+			AlbumID:     album.ID,
+			Title:       pt.Title,
+			TrackNumber: int(pt.TrackNumber),
+			DiscNumber:  int(pt.DiscNumber),
+			DurationMs:  int(pt.DurationMs),
+			Provider:    providerName,
+			ProviderID:  pt.Id,
+			Status:      models.TrackStatusWanted,
+		})
 	}
 }
 
