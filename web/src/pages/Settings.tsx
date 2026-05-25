@@ -392,6 +392,10 @@ export default function Settings() {
           {clearCache.isPending ? 'Clearing...' : 'Clear Cache'}
         </button>
       </div>
+
+      {status?.version && (
+        <p className="text-center text-xs text-zinc-600 mt-8">{status.version}</p>
+      )}
     </div>
   );
 }

@@ -29,9 +29,10 @@ type Server struct {
 	bgWork      sync.WaitGroup
 	startTime   time.Time
 	libraryDir  string
+	version     string
 }
 
-func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string) *Server {
+func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache, dl *downloader.Service, actLog *activity.Log, frontendFS fs.FS, libraryDir string, version string) *Server {
 	s := &Server{
 		queries:     queries,
 		providers:   providers,
@@ -41,6 +42,7 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 		frontendFS:  frontendFS,
 		startTime:   time.Now().UTC(),
 		libraryDir:  libraryDir,
+		version:     version,
 	}
 	s.router = s.setupRouter()
 	return s

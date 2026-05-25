@@ -60,6 +60,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":            "ok",
+		"version":           s.version,
 		"artists_count":     len(artists),
 		"total_tracks":      totalTracks,
 		"owned_tracks":      ownedTracks,

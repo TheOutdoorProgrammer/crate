@@ -129,6 +129,7 @@ export interface DownloadProgress {
 
 export interface SystemStatus {
   status: string;
+  version?: string;
   artists_count: number;
   total_tracks?: number;
   owned_tracks?: number;

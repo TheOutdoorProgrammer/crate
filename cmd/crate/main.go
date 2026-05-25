@@ -24,6 +24,8 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/services/slskd"
 )
 
+var Version = "dev"
+
 //go:embed all:dist
 var frontendDist embed.FS
 
@@ -61,7 +63,7 @@ func main() {
 	org := organizer.NewService(queries, cfg.DownloadsDir, cfg.LibraryPath)
 	dl := downloader.NewService(queries, slskdClient, org, actLog)
 	dl.AddNotifier(navidrome.NewClient(queries))
-	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath)
+	server := api.NewServer(queries, providerMgr, providerCache, dl, actLog, frontendFS, cfg.LibraryPath, Version)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

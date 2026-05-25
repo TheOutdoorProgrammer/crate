@@ -1,9 +1,10 @@
 FROM golang:1.26-alpine AS backend
+ARG VERSION=dev
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /crate ./cmd/crate/ && \
+RUN CGO_ENABLED=0 go build -ldflags "-X main.Version=${VERSION}" -o /crate ./cmd/crate/ && \
     CGO_ENABLED=0 go build -o /provider-musicbrainz ./cmd/provider-musicbrainz/ && \
     CGO_ENABLED=0 go build -o /provider-deezer ./cmd/provider-deezer/
 
