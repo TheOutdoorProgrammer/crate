@@ -405,6 +405,7 @@
         <div class="sidebar-heading">Concepts</div>
         <a href="#providers" class="sidebar-link">Providers</a>
         <a href="#download-flow" class="sidebar-link">Download Flow</a>
+        <a href="#scoring" class="sidebar-link">Scoring System</a>
         <a href="#quality-upgrades" class="sidebar-link">Quality Upgrades</a>
         <a href="#navidrome" class="sidebar-link">Navidrome</a>
         <a href="#supported-formats" class="sidebar-link">Supported Formats</a>
@@ -458,17 +459,12 @@
     <span class="cmd">ports:</span>
       - <span class="val">"6969:6969"</span>
     <span class="cmd">volumes:</span>
-      - ./crate-data:/app/data        <span class="comment"># databases (crate.db, cache.db, activity.db)</span>
-      - ./slskd/downloads:/app/downloads
-      - ./library:/app/library
+      - ./crate:/app/data             <span class="comment"># SQLite databases</span>
+      - ./slskd/downloads:/app/downloads  <span class="comment"># Must match slskd's download dir</span>
+      - ./library:/app/library       <span class="comment"># Organized music library</span>
     <span class="cmd">environment:</span>
       - CRATE_SLSKD_URL=<span class="val">http://slskd:5030</span>
       - CRATE_SLSKD_API_KEY=<span class="val">your_api_key</span>
-      - CRATE_DOWNLOADS_DIR=<span class="val">/app/downloads</span>
-      - CRATE_LIBRARY_PATH=<span class="val">/app/library</span>
-      - CRATE_DB_PATH=<span class="val">/app/data/crate.db</span>
-      - CRATE_CACHE_PATH=<span class="val">/app/data/cache.db</span>
-      - CRATE_ACTIVITY_PATH=<span class="val">/app/data/activity.db</span>
     <span class="cmd">depends_on:</span>
       - slskd
     <span class="cmd">restart:</span> unless-stopped
@@ -478,14 +474,18 @@
     <span class="cmd">ports:</span>
       - <span class="val">"5030:5030"</span>
     <span class="cmd">volumes:</span>
-      - ./slskd:/app
-      - ./library:/crate
+      - ./slskd:/app                  <span class="comment"># slskd data (config, downloads)</span>
+      - ./library:/music             <span class="comment"># Share your library on Soulseek</span>
     <span class="cmd">environment:</span>
       - SLSKD_REMOTE_CONFIGURATION=<span class="val">true</span>
       - SLSKD_API_KEY=<span class="val">your_api_key</span>
       - SLSKD_SOULSEEK_USERNAME=<span class="val">your_username</span>
       - SLSKD_SOULSEEK_PASSWORD=<span class="val">your_password</span>
     <span class="cmd">restart:</span> unless-stopped</code></pre>
+
+      <div class="callout">
+        <strong>Important:</strong> Crate's downloads volume (<code>/app/downloads</code>) must point to the same host directory that slskd writes completed downloads to. With the config above, slskd stores downloads under <code>./slskd/downloads/</code> and crate reads from the same path. If these don't match, crate won't find downloaded files.
+      </div>
 
       <div class="callout">
         <strong>Tip:</strong> The <code>CRATE_SLSKD_API_KEY</code> must match the <code>SLSKD_API_KEY</code> you set for slskd. These two services communicate over the slskd REST API.
@@ -607,9 +607,19 @@
               <td>Priority-ordered list of acceptable download formats. The downloader picks the highest-tier match from available sources. Stored as JSON.</td>
             </tr>
             <tr>
+              <td><code>quality_fallback_enabled</code></td>
+              <td><code>true</code></td>
+              <td>Whether to accept files outside configured quality tiers. When disabled, only files matching a tier are downloaded.</td>
+            </tr>
+            <tr>
               <td><code>max_concurrent_slskd</code></td>
               <td><code>10</code></td>
               <td>Maximum number of simultaneous downloads from Soulseek.</td>
+            </tr>
+            <tr>
+              <td><code>shadow_ban_duration_minutes</code></td>
+              <td><code>60</code></td>
+              <td>How long to temporarily block a user after failed or stale downloads. Expired bans are cleaned up automatically.</td>
             </tr>
             <tr>
               <td><code>max_auto_queue</code></td>
@@ -735,24 +745,72 @@
 
       <ol>
         <li><strong>Queuing</strong> &mdash; watched items are saved with status <code>wanted</code>. The scheduler checks for new wanted tracks every scan interval.</li>
-        <li><strong>Search</strong> &mdash; Crate searches slskd (Soulseek) for each wanted track, scoring results by quality tier, file format, and bitrate.</li>
-        <li><strong>Selection</strong> &mdash; the best result is selected based on your quality tiers. Blacklisted sources are excluded.</li>
+        <li><strong>Search</strong> &mdash; Crate searches slskd (Soulseek) for each wanted track, scoring all results through a unified <a href="#scoring">scoring system</a>.</li>
+        <li><strong>Selection</strong> &mdash; the highest-scoring result is selected. Blacklisted files, shadow-banned users, and files outside configured tiers (when fallback is disabled) are excluded.</li>
         <li><strong>Download</strong> &mdash; the file is downloaded via slskd. Track status changes to <code>downloading</code>. The downloader checks progress every 10 seconds.</li>
         <li><strong>Organize</strong> &mdash; completed downloads are moved into the library with the naming convention <code>Artist/Album/Track.ext</code>.</li>
         <li><strong>Tag</strong> &mdash; metadata (artist, album, track name, track number, year) and cover art are embedded into the file.</li>
         <li><strong>Notify</strong> &mdash; if Navidrome is configured, a library scan is triggered. Track status becomes <code>owned</code>.</li>
       </ol>
 
-      <h3>Retry &amp; Blacklist</h3>
+      <h3>Retry, Blacklist &amp; Shadow Bans</h3>
       <p>Not every download succeeds on the first try. Crate handles failures automatically:</p>
       <ul>
         <li><strong>No results</strong> &mdash; track stays <code>wanted</code>. The scheduler will try again on the next cycle.</li>
-        <li><strong>Transfer failure</strong> (rejected, errored, cancelled) &mdash; the specific username + filename pair is blacklisted. Future searches skip that source but can still find the track from other users.</li>
+        <li><strong>Transfer failure</strong> (rejected, errored, cancelled) &mdash; the specific username + filename pair is permanently blacklisted. Future searches skip that source but can still find the track from other users.</li>
+        <li><strong>Stale detection</strong> &mdash; downloads are monitored for progress with state-aware timeouts: 5 minutes for active transfers, 30 minutes for queued transfers (waiting for a slot), and 10 minutes for requested transfers. If no progress is made within the timeout, the download is cancelled.</li>
+        <li><strong>Shadow banning</strong> &mdash; when a queued download stalls or a download fails to start (e.g. user offline), the user is temporarily blocked for a configurable duration (default 60 minutes). Unlike permanent file blacklists, shadow bans expire automatically. This prevents wasting time retrying users who are consistently unavailable.</li>
         <li><strong>Retry backoff</strong> &mdash; failed downloads retry with increasing delays: 5m &rarr; 15m &rarr; 30m &rarr; 1h. After 4 attempts (~2 hours), the track reverts to <code>wanted</code> for the next scheduler cycle.</li>
+        <li><strong>Management</strong> &mdash; view and remove both blacklisted files and shadow-banned users from the Blocked Sources section in Settings.</li>
       </ul>
 
       <h3>Concurrency</h3>
       <p>The <code>max_concurrent_slskd</code> setting (default 10) limits how many downloads run simultaneously. The <code>max_auto_queue</code> setting (default 50) caps how many tracks the scheduler adds per cycle, preventing the queue from growing unbounded.</p>
+
+      <!-- Scoring System -->
+      <h2 id="scoring">Scoring System</h2>
+
+      <p>Every search result is scored through a unified pipeline that balances quality, correctness, and availability. The highest-scoring file wins.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Points</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Quality tier</strong></td>
+              <td>25 &ndash; 100</td>
+              <td>Based on your configured tier list. Tier 1 = 100, Tier 2 = 75, Tier 3 = 50, etc. Files outside configured tiers use a fallback score (capped below the lowest tier).</td>
+            </tr>
+            <tr>
+              <td><strong>Artist match</strong></td>
+              <td>+20</td>
+              <td>Bonus if the artist name appears in the filename. Increases confidence it's the correct file. Intentionally kept below the tier gap (25) so quality always dominates.</td>
+            </tr>
+            <tr>
+              <td><strong>Free upload slot</strong></td>
+              <td>+10</td>
+              <td>Bonus if the user has a free upload slot, meaning the download can start immediately.</td>
+            </tr>
+            <tr>
+              <td><strong>Queue length</strong></td>
+              <td>0 &ndash; 15</td>
+              <td>Inverse decay: <code>15 / (1 + queueLength)</code>. Empty queue = 15 points. Queue of 5 = 2 points. Longer queues approach zero.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The title must appear in the filename (hard filter). All bonuses combined (max 45) can overcome one quality tier gap but never two, ensuring your quality preferences are respected while still favoring available, correctly-labeled sources.</p>
+
+      <div class="callout">
+        <strong>Quality fallback:</strong> When <code>quality_fallback_enabled</code> is set to <code>false</code>, files that don't match any configured tier are rejected entirely. When enabled (default), they receive a reduced score below the lowest tier.
+      </div>
 
       <!-- Quality Upgrades -->
       <h2 id="quality-upgrades">Quality Upgrades</h2>
@@ -1004,6 +1062,19 @@
             <tr><td><code>POST</code></td><td><code>/api/relink/artist/{id}</code></td><td>Relink an artist to a different provider.</td></tr>
             <tr><td><code>POST</code></td><td><code>/api/relink/album/{id}</code></td><td>Relink an album to a different provider.</td></tr>
             <tr><td><code>POST</code></td><td><code>/api/relink/track/{id}</code></td><td>Relink a track to a different provider.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Blocked Sources</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET</code></td><td><code>/api/blacklist</code></td><td>List all permanently blacklisted username+file pairs.</td></tr>
+            <tr><td><code>DELETE</code></td><td><code>/api/blacklist/{id}</code></td><td>Remove a blacklist entry (allows re-downloading from that source).</td></tr>
+            <tr><td><code>GET</code></td><td><code>/api/cooldowns</code></td><td>List active shadow bans (temporary per-user blocks).</td></tr>
+            <tr><td><code>DELETE</code></td><td><code>/api/cooldowns/{id}</code></td><td>Remove a shadow ban (immediately unblocks the user).</td></tr>
           </tbody>
         </table>
       </div>

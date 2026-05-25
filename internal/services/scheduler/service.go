@@ -48,6 +48,7 @@ func (s *Service) Run(ctx context.Context) {
 		case <-integrityTick.C:
 			s.checkFileIntegrity()
 			s.purgeActivityLog()
+			s.queries.PurgeExpiredCooldowns()
 		case <-upgradeTick.C:
 			s.scanForUpgrades()
 		}

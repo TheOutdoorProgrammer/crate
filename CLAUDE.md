@@ -64,12 +64,15 @@ For external providers: `CRATE_PROVIDERS=spotify:external:192.168.1.10:50053`
 5. Downloader processes queue: search slskd → pick best file → download → organize → tag
 6. Track status: `wanted` → `downloading` → `owned`
 
-## Download Retry & Blacklist
+## Download Retry, Blacklist & Shadow Bans
 
 - **No results**: immediate fail, no retry. Track stays "wanted" for the scheduler's next cycle.
 - **Transfer failures** (rejected, errored, cancelled): the (username, filename) pair is blacklisted in `slskd_blacklist` table. Future searches skip that source.
+- **Stale transfers**: state-aware timeouts detect stalled downloads. InProgress/Initializing = 5min, Queued = 30min, Requested = 10min. Active transfer stalls blacklist the file; queued/requested stalls trigger a shadow ban on the user.
+- **Shadow bans (cooldowns)**: temporary per-user blocks stored in `user_cooldowns` table. Triggered by stale queued transfers or StartDownload failures (e.g. user offline). Duration is configurable via `shadow_ban_duration_minutes` setting (default 60min). Expired cooldowns are auto-purged on the scheduler's daily integrity tick. `scoreCandidates` skips cooled-down users entirely.
 - **Retry backoff**: 5m → 15m → 30m → 1h. After 4 attempts (~2h cumulative), permanently fails. Track reverts to "wanted".
-- **Blacklist is per-file-per-user**: a user can be blacklisted for one file but not others. `pickBestFile` checks the blacklist before scoring candidates.
+- **Blacklist is per-file-per-user**: a user can be blacklisted for one file but not others. Shadow bans are per-user (all files blocked during cooldown).
+- **API management**: `GET/DELETE /api/blacklist/{id}`, `GET/DELETE /api/cooldowns/{id}` for viewing and removing entries. Also exposed in the Settings UI under "Blocked Sources".
 
 ## Pagination
 
@@ -77,12 +80,29 @@ For external providers: `CRATE_PROVIDERS=spotify:external:192.168.1.10:50053`
 - Activity API: `GET /api/activity?limit=50&offset=0` returns `{items: [...], total: N}`
 - Frontend uses "Load More" buttons for both
 
+## Scoring System
+
+All file selection goes through `scoreCandidates()` in `internal/services/downloader/service.go`. Score components:
+
+- **Quality (0-100)**: tier-based from user's priority list. Tier 0 = 100, Tier 1 = 75, Tier 2 = 50, etc. (min 25, gap of 25 per tier). If no tiers configured, uses fallback scoring. Fallback scores are capped below the lowest tier.
+- **Artist bonus (+20)**: if artist name appears in filename. Kept below the tier gap (25) so quality always dominates between tiers.
+- **Free slot bonus (+10)**: if user has a free upload slot (instant start).
+- **Queue score (0-15)**: `15 / (1 + queueLength)`. Empty queue = 15, decays toward 0.
+
+Design invariants (enforced by `TestScoringBalance`):
+- Same availability → higher tier always wins
+- Artist bonus alone cannot flip a tier (20 < 25 gap)
+- All bonuses combined (max 45) can overcome one tier gap but not two (50)
+- Fallback formats lose to configured tiers at equal availability
+
+The `quality_fallback_enabled` setting (default true) controls whether files outside configured tiers are accepted at all.
+
 ## Quality Upgrades
 
 - Priority-ordered quality tiers stored as JSON in settings (`quality_tiers`), default: FLAC > MP3 320 > MP3 256
 - `download_format` and `download_bitrate` recorded on tracks at search time (when the slskd result is picked)
 - Scheduler scans one artist per day (round-robin via `upgrade_last_artist_id` setting), re-queues owned tracks that can be upgraded to a higher-priority tier
-- `QualityTierRank()` and `IsUpgradeable()` in `internal/services/downloader/` handle scoring
+- `QualityTierRank()` and `IsUpgradeable()` in `internal/services/downloader/` handle tier ranking
 
 ## Navidrome Integration
 
@@ -129,9 +149,9 @@ Docker: multi-stage build, builds all three binaries. Alpine runtime. CI: GitHub
 ## Testing
 
 Tests live in:
-- `internal/api/handlers_test.go` — API integration tests (50+ tests)
+- `internal/api/handlers_test.go` — API integration tests (50+ tests, includes blacklist/cooldown CRUD)
 - `internal/activity/activity_test.go` — Activity log unit tests
-- `internal/services/downloader/service_test.go` — Retry delay, pickBestFile/blacklist, quality tier scoring tests
+- `internal/services/downloader/service_test.go` — Scoring system (tier-based, queue, cooldown filtering, balance invariants), retry delay, pickBestFile, blacklist, stale timeouts, inferExt
 - `internal/services/navidrome/client_test.go` — Navidrome scan trigger and auth tests
 
 The `testEnv` helper in handlers_test.go wires up real in-memory SQLite, a fake gRPC provider, fake slskd, and an in-memory activity log. Use `newTestEnv(t)` and call `env.do(method, path, body)`. The fake provider returns canned data for artist "1000" with two albums and three tracks.
@@ -139,6 +159,15 @@ The `testEnv` helper in handlers_test.go wires up real in-memory SQLite, a fake 
 ## Lidarr API Shim
 
 The Lidarr v1 API compatibility shim lives entirely in `internal/api/lidarr.go` (+ `lidarr_test.go`). **Crate is never changed to accommodate Lidarr.** All translation between Lidarr concepts and Crate internals happens inside `lidarr.go`. If Lidarr needs something Crate doesn't expose, the shim adapts — we do not add fields, endpoints, or behaviors to Crate's core code to make Lidarr work. Lidarr compatibility is a convenience, not a requirement.
+
+## Docs maintenance
+
+When adding or changing user-facing features (new settings, API endpoints, scoring changes, download behavior), update all three:
+1. `README.md` — features list and configuration table
+2. `CLAUDE.md` — technical details for agents (this file)
+3. `site/index.html` and `site/docs.html` — marketing site and documentation
+
+The marketing docs at `site/docs.html` include a settings table, API reference, scoring system section, and download flow description that must stay in sync with the code.
 
 ## Lessons learned
 

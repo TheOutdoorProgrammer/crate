@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { useToast } from '../components/Toast';
+import type { BlacklistEntry, UserCooldown } from '../types/index';
 
 interface QualityTier {
   format: string;
@@ -20,6 +21,7 @@ const settingsSections = [
     title: 'slskd',
     fields: [
       { key: 'max_concurrent_slskd', label: 'Max Concurrent Downloads', placeholder: '10', type: 'number', description: 'How many files to download from Soulseek at the same time' },
+      { key: 'shadow_ban_duration_minutes', label: 'Shadow Ban Duration (minutes)', placeholder: '60', type: 'number', description: 'How long to temporarily block a user after failed or stale downloads' },
     ],
   },
   {
@@ -76,7 +78,11 @@ export default function Settings() {
   }, [settings]);
 
   const save = useMutation({
-    mutationFn: () => api.updateSettings({ ...form, quality_tiers: JSON.stringify(tiers) }),
+    mutationFn: () => api.updateSettings({
+      ...form,
+      quality_tiers: JSON.stringify(tiers),
+      quality_fallback_enabled: form.quality_fallback_enabled ?? 'true',
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       setSaved(true);
@@ -103,6 +109,35 @@ export default function Settings() {
   const clearCache = useMutation({
     mutationFn: () => api.clearCache(),
     onSuccess: () => toast('Cache cleared', 'success'),
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  const { data: blacklist } = useQuery({
+    queryKey: ['blacklist'],
+    queryFn: api.listBlacklist,
+  });
+
+  const { data: cooldowns } = useQuery({
+    queryKey: ['cooldowns'],
+    queryFn: api.listCooldowns,
+    refetchInterval: 30_000,
+  });
+
+  const removeBlacklist = useMutation({
+    mutationFn: (id: number) => api.deleteBlacklistEntry(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['blacklist'] });
+      toast('Blacklist entry removed', 'success');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  const removeCooldown = useMutation({
+    mutationFn: (id: number) => api.deleteCooldown(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cooldowns'] });
+      toast('Cooldown removed', 'success');
+    },
     onError: (err: Error) => toast(err.message, 'error'),
   });
 
@@ -267,6 +302,78 @@ export default function Settings() {
         >
           + Add tier
         </button>
+        <label className="flex items-center gap-2 mt-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.quality_fallback_enabled !== 'false'}
+            onChange={(e) => setForm({ ...form, quality_fallback_enabled: e.target.checked ? 'true' : 'false' })}
+            className="w-4 h-4 rounded bg-zinc-800 border-zinc-600 accent-white"
+          />
+          <span className="text-sm text-zinc-300">Allow downloads outside configured tiers</span>
+        </label>
+        <p className="text-[11px] text-zinc-600 mt-1 ml-6">
+          When disabled, only files matching a configured tier will be downloaded
+        </p>
+      </SettingsSection>
+
+      <SettingsSection title="Blocked Sources">
+        <p className="text-[11px] text-zinc-500 mb-3">
+          Temporarily banned users (shadow bans) and permanently blocked files. Remove entries to allow downloads from these sources again.
+        </p>
+
+        {cooldowns && cooldowns.length > 0 && (
+          <div className="mb-4">
+            <p className="text-xs text-zinc-400 mb-1.5">Active Cooldowns</p>
+            <div className="space-y-1">
+              {cooldowns.map((c: UserCooldown) => (
+                <div key={c.id} className="flex items-center gap-2 bg-zinc-800/50 rounded-lg px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{c.username}</p>
+                    <p className="text-[11px] text-zinc-500 truncate">{c.reason}</p>
+                    <p className="text-[11px] text-zinc-600">Expires: {new Date(c.expires_at).toLocaleString()}</p>
+                  </div>
+                  <button
+                    onClick={() => removeCooldown.mutate(c.id)}
+                    className="text-zinc-600 active:text-red-400 transition-colors shrink-0"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {blacklist && blacklist.length > 0 && (
+          <div>
+            <p className="text-xs text-zinc-400 mb-1.5">Blacklisted Files</p>
+            <div className="space-y-1">
+              {blacklist.map((b: BlacklistEntry) => (
+                <div key={b.id} className="flex items-center gap-2 bg-zinc-800/50 rounded-lg px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{b.username}</p>
+                    <p className="text-[11px] text-zinc-500 truncate">{b.filename.split(/[/\\]/).pop()}</p>
+                    <p className="text-[11px] text-zinc-600 truncate">{b.reason}</p>
+                  </div>
+                  <button
+                    onClick={() => removeBlacklist.mutate(b.id)}
+                    className="text-zinc-600 active:text-red-400 transition-colors shrink-0"
+                  >
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {(!cooldowns || cooldowns.length === 0) && (!blacklist || blacklist.length === 0) && (
+          <p className="text-sm text-zinc-600">No blocked sources</p>
+        )}
       </SettingsSection>
 
       <div className="flex gap-3 mt-6">

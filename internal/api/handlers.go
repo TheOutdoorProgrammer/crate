@@ -1023,6 +1023,52 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, settings)
 }
 
+// Blacklist & Cooldowns
+
+func (s *Server) handleListBlacklist(w http.ResponseWriter, r *http.Request) {
+	entries, err := s.queries.ListBlacklist()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list blacklist")
+		return
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
+func (s *Server) handleDeleteBlacklistEntry(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.queries.DeleteBlacklistEntry(id); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete blacklist entry")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleListCooldowns(w http.ResponseWriter, r *http.Request) {
+	cooldowns, err := s.queries.ListActiveCooldowns()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list cooldowns")
+		return
+	}
+	writeJSON(w, http.StatusOK, cooldowns)
+}
+
+func (s *Server) handleDeleteCooldown(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.queries.DeleteCooldown(id); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete cooldown")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // Helpers
 
 func strPtrOrNil(s string) *string {

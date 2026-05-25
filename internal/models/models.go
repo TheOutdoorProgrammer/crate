@@ -118,3 +118,19 @@ type ActivityLog struct {
 	Details   string `json:"details"`
 	CreatedAt string `json:"created_at"`
 }
+
+type UserCooldown struct {
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	Reason    string `json:"reason"`
+	ExpiresAt string `json:"expires_at"`
+	CreatedAt string `json:"created_at"`
+}
+
+type BlacklistEntry struct {
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	Filename  string `json:"filename"`
+	Reason    string `json:"reason"`
+	CreatedAt string `json:"created_at"`
+}

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -1792,5 +1793,105 @@ func TestUserSourcedDownloadKeptAsFailed(t *testing.T) {
 	}
 	if updated[0].Source != "user" {
 		t.Errorf("source should still be 'user', got %q", updated[0].Source)
+	}
+}
+
+func TestListBlacklistEmpty(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/blacklist", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var entries []models.BlacklistEntry
+	json.Unmarshal(w.Body.Bytes(), &entries)
+	if len(entries) != 0 {
+		t.Errorf("expected empty blacklist, got %d", len(entries))
+	}
+}
+
+func TestBlacklistCRUD(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.queries.BlacklistFile("testuser", "bad/file.mp3", "transfer failed")
+	env.queries.BlacklistFile("testuser2", "bad/file2.flac", "stale")
+
+	w := env.do("GET", "/api/blacklist", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var entries []models.BlacklistEntry
+	json.Unmarshal(w.Body.Bytes(), &entries)
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	w = env.do("DELETE", fmt.Sprintf("/api/blacklist/%d", entries[0].ID), "")
+	if w.Code != 204 {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+
+	w = env.do("GET", "/api/blacklist", "")
+	json.Unmarshal(w.Body.Bytes(), &entries)
+	if len(entries) != 1 {
+		t.Errorf("expected 1 entry after delete, got %d", len(entries))
+	}
+}
+
+func TestListCooldownsEmpty(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("GET", "/api/cooldowns", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var cooldowns []models.UserCooldown
+	json.Unmarshal(w.Body.Bytes(), &cooldowns)
+	if len(cooldowns) != 0 {
+		t.Errorf("expected empty cooldowns, got %d", len(cooldowns))
+	}
+}
+
+func TestCooldownCRUD(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.queries.CooldownUser("banned_user", "offline", 60*time.Minute)
+
+	w := env.do("GET", "/api/cooldowns", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var cooldowns []models.UserCooldown
+	json.Unmarshal(w.Body.Bytes(), &cooldowns)
+	if len(cooldowns) != 1 {
+		t.Fatalf("expected 1 cooldown, got %d", len(cooldowns))
+	}
+	if cooldowns[0].Username != "banned_user" {
+		t.Errorf("expected banned_user, got %s", cooldowns[0].Username)
+	}
+
+	w = env.do("DELETE", fmt.Sprintf("/api/cooldowns/%d", cooldowns[0].ID), "")
+	if w.Code != 204 {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+
+	w = env.do("GET", "/api/cooldowns", "")
+	json.Unmarshal(w.Body.Bytes(), &cooldowns)
+	if len(cooldowns) != 0 {
+		t.Errorf("expected 0 cooldowns after delete, got %d", len(cooldowns))
+	}
+}
+
+func TestDeleteBlacklistBadID(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("DELETE", "/api/blacklist/abc", "")
+	if w.Code != 400 {
+		t.Errorf("expected 400 for invalid id, got %d", w.Code)
+	}
+}
+
+func TestDeleteCooldownBadID(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("DELETE", "/api/cooldowns/abc", "")
+	if w.Code != 400 {
+		t.Errorf("expected 400 for invalid id, got %d", w.Code)
 	}
 }

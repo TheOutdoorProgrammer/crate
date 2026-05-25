@@ -33,16 +33,12 @@ services:
     ports:
       - "6969:6969"
     volumes:
-      - ./crate-data:/app/data
-      - ./slskd/downloads:/app/downloads
-      - ./library:/app/library
+      - ./crate:/app/data             # SQLite databases
+      - ./slskd/downloads:/app/downloads  # Must match slskd's download dir
+      - ./library:/app/library       # Organized music library
     environment:
-      - CRATE_PORT=6969
       - CRATE_SLSKD_URL=http://slskd:5030
       - CRATE_SLSKD_API_KEY=your_api_key
-      - CRATE_DOWNLOADS_DIR=/app/downloads
-      - CRATE_LIBRARY_PATH=/app/library
-      - CRATE_SCAN_INTERVAL=24h
     depends_on:
       - slskd
     restart: unless-stopped
@@ -52,10 +48,9 @@ services:
     ports:
       - "5030:5030"
     volumes:
-      - ./slskd:/app
-      - ./library:/crate
+      - ./slskd:/app                  # slskd data (config, downloads)
+      - ./library:/music             # Share your library on Soulseek
     environment:
-      - TZ=ETC/UTC
       - SLSKD_REMOTE_CONFIGURATION=true
       - SLSKD_API_KEY=your_api_key
       - SLSKD_SOULSEEK_USERNAME=your_soulseek_username
@@ -65,6 +60,8 @@ services:
 
 Replace `your_api_key` (must match in both services), `your_soulseek_username`, and `your_soulseek_password` with your own values.
 
+> **Important:** Crate's downloads volume (`/app/downloads`) must point to the same host directory that slskd writes completed downloads to. With the config above, slskd stores downloads under `./slskd/downloads/` and crate reads from the same path. If these don't match, crate won't find downloaded files.
+
 Open `http://localhost:6969`.
 
 ## Features
@@ -72,10 +69,14 @@ Open `http://localhost:6969`.
 - **Pluggable providers** -- search via MusicBrainz, Deezer, or custom gRPC providers. Switch providers on the fly from the search UI.
 - **Search** -- find artists, browse their full discography with metadata
 - **Watch** -- save artists, albums, or individual tracks to your library
-- **Download** -- searches slskd (Soulseek), picks the best file from supported formats, downloads automatically
+- **Download** -- searches slskd (Soulseek), scores all results using a unified scoring system, and downloads the best match automatically
+- **Smart scoring** -- tier-based quality scoring from your configured priority list, artist name matching bonus, free upload slot bonus, and queue-length-aware scoring using inverse decay. Quality always dominates; availability tips close calls.
 - **Retry with backoff** -- failed downloads retry with backoff (5m → 15m → 30m → 1h, gives up after ~2h). Failed sources are blacklisted per-user per-file so they're never retried.
+- **Shadow banning** -- users who go offline mid-transfer or whose queued downloads stall are temporarily blocked (configurable duration, default 60min). Different from permanent file blacklists -- shadow bans expire automatically.
+- **State-aware stale detection** -- detects stalled downloads with timeouts tuned to the transfer state: actively transferring (5min), queued/waiting for a slot (30min), or requested (10min). Queued stalls trigger shadow bans; active transfer stalls blacklist the specific file.
+- **Blocked sources management** -- view and remove blacklisted files and shadow-banned users from the Settings UI
 - **Manual search** -- browse all slskd results for a track, see scores/format/queue info, and pick which one to download
-- **Quality upgrades** -- configure priority-ordered quality tiers (e.g. FLAC > MP3 320 > MP3 256). Scheduler scans one artist per day and re-queues tracks that can be upgraded.
+- **Quality tiers** -- configure priority-ordered quality tiers (e.g. FLAC > MP3 320 > MP3 256) with an optional fallback toggle to reject files outside your configured tiers. Scheduler scans one artist per day and re-queues tracks that can be upgraded.
 - **Navidrome integration** -- optionally trigger a Navidrome library scan after each download so new files appear immediately
 - **Organize** -- moves completed files to `library/{Artist}/{Album (Year)}/{nn} - {Title}.ext`
 - **Metadata tagging** -- writes ID3v2 (MP3), Vorbis comments (FLAC), and RIFF INFO (WAV) with artist, album, track, year, and cover art (MP3/FLAC)
@@ -85,7 +86,7 @@ Open `http://localhost:6969`.
 - **Relink** -- reassign any artist to a different provider without losing your library data
 - **Scheduled scans** -- re-queues wanted tracks and checks for new releases on a configurable interval
 - **Duplicate guard** -- prevents duplicate artists, albums, and download queue entries
-- **Settings UI** -- configure providers, slskd connection, Navidrome, quality tiers, library path, scan interval, and more from the browser
+- **Settings UI** -- configure providers, slskd connection, Navidrome, quality tiers, quality fallback, shadow ban duration, library path, scan interval, and more from the browser
 - **Mobile-first** -- responsive layout with bottom nav on mobile, sidebar on desktop
 
 ## Lidarr API Compatibility

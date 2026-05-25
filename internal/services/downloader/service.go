@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -17,7 +18,6 @@ import (
 )
 
 const defaultMaxConcurrentSlskd = 10
-const staleDownloadTimeout = 5 * time.Minute
 
 var supportedExts = map[string]bool{
 	".flac": true,
@@ -88,11 +88,24 @@ func (s *Service) GetProgress(ctx context.Context) ([]ProgressItem, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	activeTransfers := make(map[string]bool)
+	downloading, _ := s.queries.ListDownloads("downloading")
+	for _, d := range downloading {
+		if d.SlskdSearchID != nil {
+			activeTransfers[*d.SlskdSearchID] = true
+		}
+	}
+
 	var items []ProgressItem
 	for _, ud := range dirs {
 		for _, dir := range ud.Directories {
 			for _, f := range dir.Files {
 				if strings.Contains(f.State, "Completed") {
+					continue
+				}
+				transferKey := ud.Username + "|" + f.ID
+				if !activeTransfers[transferKey] {
 					continue
 				}
 				items = append(items, ProgressItem{
@@ -205,6 +218,29 @@ func (s *Service) tick(ctx context.Context) {
 	}
 }
 
+func (s *Service) getCooldownDuration() time.Duration {
+	if v, err := s.queries.GetSetting("shadow_ban_duration_minutes"); err == nil && v != "" {
+		if mins, err := strconv.Atoi(v); err == nil && mins > 0 {
+			return time.Duration(mins) * time.Minute
+		}
+	}
+	return 60 * time.Minute
+}
+
+func (s *Service) getScoringConfig() scoringConfig {
+	cfg := scoringConfig{fallbackEnabled: true}
+	if tiersJSON, err := s.queries.GetSetting("quality_tiers"); err == nil && tiersJSON != "" {
+		var tiers []models.QualityTier
+		if json.Unmarshal([]byte(tiersJSON), &tiers) == nil {
+			cfg.tiers = tiers
+		}
+	}
+	if v, err := s.queries.GetSetting("quality_fallback_enabled"); err == nil && v == "false" {
+		cfg.fallbackEnabled = false
+	}
+	return cfg
+}
+
 func (s *Service) getMaxConcurrent() int {
 	v, err := s.queries.GetSetting("max_concurrent_slskd")
 	if err != nil {
@@ -260,7 +296,7 @@ func (s *Service) checkSearch(ctx context.Context, d models.DownloadQueueItem) e
 		return err
 	}
 
-	best := pickBestFile(search.Responses, track, s.queries)
+	best := pickBestFile(search.Responses, track, s.queries, s.getScoringConfig())
 	if best == nil {
 		_ = s.slskd.DeleteSearch(ctx, *d.SlskdSearchID)
 		errStr := "no suitable file found"
@@ -287,6 +323,8 @@ func (s *Service) checkSearch(ctx context.Context, d models.DownloadQueueItem) e
 
 	transfer, err := s.slskd.StartDownload(ctx, best.username, best.file.Filename, best.file.Size)
 	if err != nil {
+		s.queries.CooldownUser(best.username, "download failed: "+err.Error(), s.getCooldownDuration())
+		slog.Info("downloader: download start failed, shadow banning user", "username", best.username, "error", err)
 		return s.failWithRetry(d, err.Error())
 	}
 
@@ -357,21 +395,29 @@ func (s *Service) checkDownload(ctx context.Context, d models.DownloadQueueItem)
 		return s.failWithRetry(d, "transfer failed: "+state)
 	}
 
-	// Check for stale transfers — no progress for too long means peer is gone
 	if transfer.BytesTransferred > d.LastProgressBytes {
 		_ = s.queries.UpdateDownloadProgress(d.ID, transfer.BytesTransferred)
 		return nil
 	}
+
+	timeout := staleTimeoutForState(state)
 	if d.LastAttempt != nil {
 		lastProgress := mustParseTime(*d.LastAttempt)
-		if !lastProgress.IsZero() && time.Since(lastProgress) > staleDownloadTimeout {
+		if !lastProgress.IsZero() && time.Since(lastProgress) > timeout {
 			_ = s.slskd.CancelDownload(ctx, username, transferID)
 			_ = s.queries.UpdateTrackStatus(d.TrackID, models.TrackStatusWanted)
-			_ = s.queries.BlacklistFile(username, transfer.Filename, "stale transfer: no progress for "+staleDownloadTimeout.String())
-			slog.Info("downloader: stale transfer, blacklisting", "username", username, "filename", filepath.Base(transfer.Filename), "download_id", d.ID)
+
+			reason := fmt.Sprintf("stale transfer (%s): no progress for %s", state, timeout)
+			if strings.Contains(state, "Queued") || strings.Contains(state, "Requested") {
+				s.queries.CooldownUser(username, reason, s.getCooldownDuration())
+				slog.Info("downloader: stale queued transfer, shadow banning user", "username", username, "state", state, "download_id", d.ID)
+			} else {
+				_ = s.queries.BlacklistFile(username, transfer.Filename, reason)
+				slog.Info("downloader: stale transfer, blacklisting file", "username", username, "filename", filepath.Base(transfer.Filename), "download_id", d.ID)
+			}
 			s.logActivity("download_failed", "track", d.TrackID,
-				fmt.Sprintf("Stale transfer (no progress for %s) from %s (blacklisted)", staleDownloadTimeout, username))
-			return s.failWithRetry(d, "stale transfer: no progress for "+staleDownloadTimeout.String())
+				fmt.Sprintf("Stale transfer (%s, %s) from %s", state, timeout, username))
+			return s.failWithRetry(d, reason)
 		}
 	}
 	return nil
@@ -489,7 +535,9 @@ func (s *Service) ManualSearch(ctx context.Context, trackID int64) ([]ManualSear
 		return nil, fmt.Errorf("search failed")
 	}
 
-	candidates := scoreCandidates(search.Responses, track, nil)
+	cfg := s.getScoringConfig()
+	cfg.fallbackEnabled = true
+	candidates := scoreCandidates(search.Responses, track, nil, cfg)
 
 	_ = s.slskd.DeleteSearch(ctx, search.ID)
 
@@ -559,18 +607,21 @@ func (s *Service) ManualDownload(ctx context.Context, trackID int64, username, f
 	return nil
 }
 
-func scoreCandidates(results []slskd.SearchResult, track *models.Track, bl blacklistChecker) []candidate {
+func scoreCandidates(results []slskd.SearchResult, track *models.Track, ac availabilityChecker, cfg scoringConfig) []candidate {
 	titleLower := strings.ToLower(track.Title)
 	artistLower := strings.ToLower(track.ArtistName)
 
 	var candidates []candidate
 
 	for _, result := range results {
+		if ac != nil && ac.IsUserCooledDown(result.Username) {
+			continue
+		}
 		for _, f := range result.Files {
 			if f.IsLocked {
 				continue
 			}
-			if bl != nil && bl.IsBlacklisted(result.Username, f.Filename) {
+			if ac != nil && ac.IsBlacklisted(result.Username, f.Filename) {
 				continue
 			}
 			nameLower := strings.ToLower(f.Filename)
@@ -589,16 +640,20 @@ func scoreCandidates(results []slskd.SearchResult, track *models.Track, bl black
 				continue
 			}
 
-			score := formatScore(ext, f.BitRate)
-			if strings.Contains(nameLower, artistLower) {
-				score += 30
+			qualityScore, allowed := tierBasedScore(ext, f.BitRate, cfg)
+			if !allowed {
+				continue
 			}
-			if result.HasFreeUploadSlot {
+			score := qualityScore
+			// Keep artist bonus below the tier gap (25) so quality always dominates.
+			if strings.Contains(nameLower, artistLower) {
 				score += 20
 			}
-			if result.QueueLength < 10 {
-				score += 10
+			freeSlotBonus := 0
+			if result.HasFreeUploadSlot {
+				freeSlotBonus = 10
 			}
+			score += freeSlotBonus + queueScore(result.QueueLength)
 
 			candidates = append(candidates, candidate{
 				username:    result.Username,
@@ -646,6 +701,19 @@ func IsUpgradeable(tiers []models.QualityTier, track *models.Track) bool {
 	return currentRank > 0
 }
 
+func staleTimeoutForState(state string) time.Duration {
+	switch {
+	case strings.Contains(state, "InProgress"), strings.Contains(state, "Initializing"):
+		return 5 * time.Minute
+	case strings.Contains(state, "Queued"):
+		return 30 * time.Minute
+	case strings.Contains(state, "Requested"):
+		return 10 * time.Minute
+	default:
+		return 5 * time.Minute
+	}
+}
+
 func mustParseTime(s string) time.Time {
 	t, _ := time.Parse(time.RFC3339, s)
 	return t
@@ -666,12 +734,18 @@ type candidate struct {
 	queueLength int
 }
 
-type blacklistChecker interface {
+type availabilityChecker interface {
 	IsBlacklisted(username, filename string) bool
+	IsUserCooledDown(username string) bool
 }
 
-func pickBestFile(results []slskd.SearchResult, track *models.Track, bl blacklistChecker) *candidate {
-	candidates := scoreCandidates(results, track, bl)
+type scoringConfig struct {
+	tiers           []models.QualityTier
+	fallbackEnabled bool
+}
+
+func pickBestFile(results []slskd.SearchResult, track *models.Track, ac availabilityChecker, cfg scoringConfig) *candidate {
+	candidates := scoreCandidates(results, track, ac, cfg)
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -691,26 +765,54 @@ func inferExt(nameLower string) string {
 	return ""
 }
 
-func formatScore(ext string, bitRate int) int {
+func tierBasedScore(ext string, bitRate int, cfg scoringConfig) (int, bool) {
+	format := strings.TrimPrefix(ext, ".")
+	if len(cfg.tiers) == 0 {
+		return fallbackScore(ext, bitRate), true
+	}
+	rank := QualityTierRank(cfg.tiers, format, bitRate)
+	if rank >= 0 {
+		score := 100 - (rank * 25)
+		if score < 25 {
+			score = 25
+		}
+		return score, true
+	}
+	if !cfg.fallbackEnabled {
+		return 0, false
+	}
+	lowestTier := 100 - ((len(cfg.tiers) - 1) * 25)
+	if lowestTier < 25 {
+		lowestTier = 25
+	}
+	score := fallbackScore(ext, bitRate)
+	if score >= lowestTier {
+		score = lowestTier - 5
+	}
+	return score, true
+}
+
+func fallbackScore(ext string, bitRate int) int {
 	if losslessExts[ext] {
-		return 100
+		return 20
 	}
 	switch ext {
 	case ".ogg", ".opus", ".aac", ".m4a":
 		if bitRate >= 256 {
-			return 60
-		}
-		if bitRate >= 192 {
-			return 40
-		}
-		return 25
-	default:
-		if bitRate >= 320 {
-			return 50
-		}
-		if bitRate >= 256 {
-			return 30
+			return 15
 		}
 		return 10
+	default:
+		if bitRate >= 320 {
+			return 15
+		}
+		if bitRate >= 256 {
+			return 12
+		}
+		return 5
 	}
+}
+
+func queueScore(queueLength int) int {
+	return int(15.0 / float64(1+queueLength))
 }

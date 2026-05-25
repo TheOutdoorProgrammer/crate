@@ -787,21 +787,76 @@ func (q *Queries) IsBlacklisted(username, filename string) bool {
 	return count > 0
 }
 
-func (q *Queries) ListBlacklisted() ([]map[string]string, error) {
-	rows, err := q.db.Query(`SELECT username, filename, reason, created_at FROM slskd_blacklist ORDER BY created_at DESC`)
+func (q *Queries) ListBlacklist() ([]models.BlacklistEntry, error) {
+	rows, err := q.db.Query(`SELECT rowid, username, filename, reason, created_at FROM slskd_blacklist ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []map[string]string
+	var items []models.BlacklistEntry
 	for rows.Next() {
-		var u, f, r, c string
-		if err := rows.Scan(&u, &f, &r, &c); err != nil {
+		var e models.BlacklistEntry
+		if err := rows.Scan(&e.ID, &e.Username, &e.Filename, &e.Reason, &e.CreatedAt); err != nil {
 			return nil, err
 		}
-		items = append(items, map[string]string{"username": u, "filename": f, "reason": r, "created_at": c})
+		items = append(items, e)
 	}
 	return items, rows.Err()
+}
+
+func (q *Queries) DeleteBlacklistEntry(id int64) error {
+	_, err := q.db.Exec(`DELETE FROM slskd_blacklist WHERE rowid = ?`, id)
+	return err
+}
+
+// Cooldowns (shadow banning)
+
+func (q *Queries) CooldownUser(username, reason string, duration time.Duration) error {
+	expiresAt := time.Now().UTC().Add(duration).Format(time.RFC3339)
+	_, err := q.db.Exec(
+		`INSERT INTO user_cooldowns (username, reason, expires_at, created_at)
+		 VALUES (?, ?, ?, ?)`,
+		username, reason, expiresAt, now(),
+	)
+	return err
+}
+
+func (q *Queries) IsUserCooledDown(username string) bool {
+	var count int
+	q.db.QueryRow(
+		`SELECT COUNT(*) FROM user_cooldowns WHERE username = ? AND expires_at > ?`,
+		username, now(),
+	).Scan(&count)
+	return count > 0
+}
+
+func (q *Queries) ListActiveCooldowns() ([]models.UserCooldown, error) {
+	rows, err := q.db.Query(
+		`SELECT id, username, reason, expires_at, created_at FROM user_cooldowns WHERE expires_at > ? ORDER BY expires_at`,
+		now(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []models.UserCooldown
+	for rows.Next() {
+		var c models.UserCooldown
+		if err := rows.Scan(&c.ID, &c.Username, &c.Reason, &c.ExpiresAt, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, c)
+	}
+	return items, rows.Err()
+}
+
+func (q *Queries) DeleteCooldown(id int64) error {
+	_, err := q.db.Exec(`DELETE FROM user_cooldowns WHERE id = ?`, id)
+	return err
+}
+
+func (q *Queries) PurgeExpiredCooldowns() {
+	q.db.Exec(`DELETE FROM user_cooldowns WHERE expires_at <= ?`, now())
 }
 
 // Library Search

@@ -122,6 +122,16 @@ func (s *Server) setupRouter() chi.Router {
 			r.Delete("/{id}", s.handleDeleteDownload)
 		})
 
+		r.Route("/blacklist", func(r chi.Router) {
+			r.Get("/", s.handleListBlacklist)
+			r.Delete("/{id}", s.handleDeleteBlacklistEntry)
+		})
+
+		r.Route("/cooldowns", func(r chi.Router) {
+			r.Get("/", s.handleListCooldowns)
+			r.Delete("/{id}", s.handleDeleteCooldown)
+		})
+
 		r.Get("/providers", s.handleListProviders)
 		r.Get("/activity", s.handleListActivity)
 		r.Delete("/cache", s.handleClearCache)

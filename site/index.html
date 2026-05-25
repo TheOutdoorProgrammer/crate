@@ -511,7 +511,7 @@
           <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         </div>
         <h3>Hunt</h3>
-        <p>Searches Soulseek via slskd for the best available quality. Configurable tiers (FLAC &gt; MP3 320 &gt; MP3 256), automatic retry with backoff, per-source blacklisting.</p>
+        <p>Smart scoring ranks every result by quality tier, artist match, upload slot availability, and queue depth. Stale downloads are detected automatically. Bad sources get shadow banned. Retries with backoff.</p>
       </div>
 
       <div class="feature-card">
@@ -600,14 +600,12 @@
     <span class="cmd">ports:</span>
       - <span class="val">"6969:6969"</span>
     <span class="cmd">volumes:</span>
-      - ./crate-data:/app/data
-      - ./slskd/downloads:/app/downloads
-      - ./library:/app/library
+      - ./crate:/app/data             <span class="comment"># SQLite databases</span>
+      - ./slskd/downloads:/app/downloads  <span class="comment"># Must match slskd's download dir</span>
+      - ./library:/app/library       <span class="comment"># Organized music library</span>
     <span class="cmd">environment:</span>
       - CRATE_SLSKD_URL=<span class="val">http://slskd:5030</span>
       - CRATE_SLSKD_API_KEY=<span class="val">your_api_key</span>
-      - CRATE_DOWNLOADS_DIR=<span class="val">/app/downloads</span>
-      - CRATE_LIBRARY_PATH=<span class="val">/app/library</span>
     <span class="cmd">depends_on:</span>
       - slskd
     <span class="cmd">restart:</span> unless-stopped
@@ -617,8 +615,8 @@
     <span class="cmd">ports:</span>
       - <span class="val">"5030:5030"</span>
     <span class="cmd">volumes:</span>
-      - ./slskd:/app
-      - ./library:/crate
+      - ./slskd:/app                  <span class="comment"># slskd data (config, downloads)</span>
+      - ./library:/music             <span class="comment"># Share your library on Soulseek</span>
     <span class="cmd">environment:</span>
       - SLSKD_REMOTE_CONFIGURATION=<span class="val">true</span>
       - SLSKD_API_KEY=<span class="val">your_api_key</span>

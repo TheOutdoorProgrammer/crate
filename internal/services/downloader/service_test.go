@@ -37,13 +37,23 @@ func TestRetryDelayTotalUnder2Hours(t *testing.T) {
 	}
 }
 
-type fakeBlacklist struct {
-	blocked map[string]bool
+type fakeAvailability struct {
+	blocked   map[string]bool
+	cooledDown map[string]bool
 }
 
-func (f *fakeBlacklist) IsBlacklisted(username, filename string) bool {
+func (f *fakeAvailability) IsBlacklisted(username, filename string) bool {
 	return f.blocked[username+"|"+filename]
 }
+
+func (f *fakeAvailability) IsUserCooledDown(username string) bool {
+	if f.cooledDown == nil {
+		return false
+	}
+	return f.cooledDown[username]
+}
+
+var defaultCfg = scoringConfig{fallbackEnabled: true}
 
 func TestPickBestFilePrefersFLAC(t *testing.T) {
 	results := []slskd.SearchResult{
@@ -57,7 +67,7 @@ func TestPickBestFilePrefersFLAC(t *testing.T) {
 		},
 	}
 	track := &models.Track{Title: "Track", ArtistName: "Artist"}
-	best := pickBestFile(results, track, nil)
+	best := pickBestFile(results, track, nil, defaultCfg)
 	if best == nil {
 		t.Fatal("expected a result")
 	}
@@ -77,7 +87,7 @@ func TestPickBestFileSkipsLocked(t *testing.T) {
 		},
 	}
 	track := &models.Track{Title: "Track", ArtistName: "Artist"}
-	best := pickBestFile(results, track, nil)
+	best := pickBestFile(results, track, nil, defaultCfg)
 	if best == nil {
 		t.Fatal("expected a result")
 	}
@@ -104,12 +114,12 @@ func TestPickBestFileSkipsBlacklisted(t *testing.T) {
 		},
 	}
 
-	bl := &fakeBlacklist{blocked: map[string]bool{
+	bl := &fakeAvailability{blocked: map[string]bool{
 		"baduser|music/Artist - Track.flac": true,
 	}}
 
 	track := &models.Track{Title: "Track", ArtistName: "Artist"}
-	best := pickBestFile(results, track, bl)
+	best := pickBestFile(results, track, bl, defaultCfg)
 	if best == nil {
 		t.Fatal("expected a result")
 	}
@@ -186,12 +196,12 @@ func TestPickBestFileReturnsNilWhenAllBlacklisted(t *testing.T) {
 		},
 	}
 
-	bl := &fakeBlacklist{blocked: map[string]bool{
+	bl := &fakeAvailability{blocked: map[string]bool{
 		"user1|music/Artist - Track.flac": true,
 	}}
 
 	track := &models.Track{Title: "Track", ArtistName: "Artist"}
-	best := pickBestFile(results, track, bl)
+	best := pickBestFile(results, track, bl, defaultCfg)
 	if best != nil {
 		t.Errorf("expected nil when all results blacklisted, got %s", best.file.Filename)
 	}
@@ -216,7 +226,7 @@ func TestScoreCandidatesReturnsSortedResults(t *testing.T) {
 	}
 
 	track := &models.Track{Title: "Track", ArtistName: "Artist"}
-	scored := scoreCandidates(results, track, nil)
+	scored := scoreCandidates(results, track, nil, defaultCfg)
 
 	if len(scored) != 3 {
 		t.Fatalf("expected 3 results, got %d", len(scored))
@@ -242,12 +252,12 @@ func TestScoreCandidatesExcludesBlacklisted(t *testing.T) {
 		},
 	}
 
-	bl := &fakeBlacklist{blocked: map[string]bool{
+	bl := &fakeAvailability{blocked: map[string]bool{
 		"user1|music/Artist - Track.flac": true,
 	}}
 
 	track := &models.Track{Title: "Track", ArtistName: "Artist"}
-	scored := scoreCandidates(results, track, bl)
+	scored := scoreCandidates(results, track, bl, defaultCfg)
 
 	if len(scored) != 0 {
 		t.Errorf("expected 0 results when blacklisted, got %d", len(scored))
@@ -283,5 +293,320 @@ func TestQualityTierRankMatchesBitrateThreshold(t *testing.T) {
 	}
 	if r := QualityTierRank(tiers, "mp3", 128); r != -1 {
 		t.Errorf("128kbps should not match any tier, got %d", r)
+	}
+}
+
+func TestTierBasedScoreWithTiers(t *testing.T) {
+	cfg := scoringConfig{
+		tiers: []models.QualityTier{
+			{Format: "flac", Label: "FLAC"},
+			{Format: "mp3", MinBitrate: 320, Label: "MP3 320"},
+			{Format: "mp3", MinBitrate: 256, Label: "MP3 256"},
+		},
+		fallbackEnabled: true,
+	}
+
+	tests := []struct {
+		ext       string
+		bitRate   int
+		wantScore int
+		wantOK    bool
+	}{
+		{".flac", 0, 100, true},
+		{".mp3", 320, 75, true},
+		{".mp3", 256, 50, true},
+		{".ogg", 256, 15, true},
+	}
+
+	for _, tt := range tests {
+		score, ok := tierBasedScore(tt.ext, tt.bitRate, cfg)
+		if ok != tt.wantOK {
+			t.Errorf("tierBasedScore(%q, %d): ok=%v, want %v", tt.ext, tt.bitRate, ok, tt.wantOK)
+		}
+		if score != tt.wantScore {
+			t.Errorf("tierBasedScore(%q, %d) = %d, want %d", tt.ext, tt.bitRate, score, tt.wantScore)
+		}
+	}
+}
+
+func TestTierBasedScoreRejectsWhenFallbackDisabled(t *testing.T) {
+	cfg := scoringConfig{
+		tiers: []models.QualityTier{
+			{Format: "flac", Label: "FLAC"},
+		},
+		fallbackEnabled: false,
+	}
+
+	score, ok := tierBasedScore(".mp3", 320, cfg)
+	if ok {
+		t.Errorf("expected rejection for mp3 when fallback disabled, got score=%d", score)
+	}
+}
+
+func TestTierBasedScoreNoTiersFallback(t *testing.T) {
+	cfg := scoringConfig{fallbackEnabled: true}
+
+	score, ok := tierBasedScore(".flac", 0, cfg)
+	if !ok || score != 20 {
+		t.Errorf("expected fallback score 20 for flac with no tiers, got %d ok=%v", score, ok)
+	}
+}
+
+func TestQueueScore(t *testing.T) {
+	tests := []struct {
+		queueLen int
+		want     int
+	}{
+		{0, 15},
+		{1, 7},
+		{2, 5},
+		{5, 2},
+		{14, 1},
+		{15, 0},
+	}
+
+	for _, tt := range tests {
+		got := queueScore(tt.queueLen)
+		if got != tt.want {
+			t.Errorf("queueScore(%d) = %d, want %d", tt.queueLen, got, tt.want)
+		}
+	}
+}
+
+func TestScoreCandidatesExcludesCooledDown(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username:          "banned_user",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Track.flac", Size: 30000000},
+			},
+		},
+		{
+			Username:          "good_user",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Track.mp3", Size: 8000000, BitRate: 320},
+			},
+		},
+	}
+
+	ac := &fakeAvailability{
+		blocked:    map[string]bool{},
+		cooledDown: map[string]bool{"banned_user": true},
+	}
+
+	track := &models.Track{Title: "Track", ArtistName: "Artist"}
+	scored := scoreCandidates(results, track, ac, defaultCfg)
+
+	if len(scored) != 1 {
+		t.Fatalf("expected 1 result (cooled down user excluded), got %d", len(scored))
+	}
+	if scored[0].username != "good_user" {
+		t.Errorf("expected good_user, got %s", scored[0].username)
+	}
+}
+
+func TestScoreCandidatesArtistBonus(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username:          "user1",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/SomeArtist - Track.mp3", Size: 8000000, BitRate: 320},
+				{Filename: "music/Other - Track.mp3", Size: 8000000, BitRate: 320},
+			},
+		},
+	}
+
+	track := &models.Track{Title: "Track", ArtistName: "SomeArtist"}
+	scored := scoreCandidates(results, track, nil, defaultCfg)
+
+	if len(scored) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(scored))
+	}
+	if scored[0].score <= scored[1].score {
+		t.Errorf("expected artist-matching file to score higher: %d vs %d", scored[0].score, scored[1].score)
+	}
+}
+
+func TestScoreCandidatesFreeSlotBonus(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username:          "free_user",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Track.mp3", Size: 8000000, BitRate: 320},
+			},
+		},
+		{
+			Username:          "busy_user",
+			HasFreeUploadSlot: false,
+			QueueLength:       10,
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Track.mp3", Size: 8000000, BitRate: 320},
+			},
+		},
+	}
+
+	track := &models.Track{Title: "Track", ArtistName: "Artist"}
+	scored := scoreCandidates(results, track, nil, defaultCfg)
+
+	if len(scored) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(scored))
+	}
+	if scored[0].username != "free_user" {
+		t.Errorf("expected free_user first (free slot + queue bonus), got %s", scored[0].username)
+	}
+}
+
+func TestStaleTimeoutForState(t *testing.T) {
+	tests := []struct {
+		state string
+		want  time.Duration
+	}{
+		{"InProgress", 5 * time.Minute},
+		{"Initializing", 5 * time.Minute},
+		{"Queued, Remotely", 30 * time.Minute},
+		{"Queued, Locally", 30 * time.Minute},
+		{"Requested", 10 * time.Minute},
+		{"SomeUnknownState", 5 * time.Minute},
+	}
+
+	for _, tt := range tests {
+		got := staleTimeoutForState(tt.state)
+		if got != tt.want {
+			t.Errorf("staleTimeoutForState(%q) = %v, want %v", tt.state, got, tt.want)
+		}
+	}
+}
+
+func TestFallbackScoreNeverExceedsTierScores(t *testing.T) {
+	cfg := scoringConfig{
+		tiers: []models.QualityTier{
+			{Format: "flac", Label: "FLAC"},
+			{Format: "mp3", MinBitrate: 320, Label: "MP3 320"},
+		},
+		fallbackEnabled: true,
+	}
+
+	flacScore, _ := tierBasedScore(".flac", 0, cfg)
+	mp3Score, _ := tierBasedScore(".mp3", 320, cfg)
+	oggScore, _ := tierBasedScore(".ogg", 320, cfg)
+
+	if oggScore >= mp3Score {
+		t.Errorf("fallback ogg score (%d) should be less than tier mp3 score (%d)", oggScore, mp3Score)
+	}
+	if mp3Score >= flacScore {
+		t.Errorf("tier mp3 score (%d) should be less than tier flac score (%d)", mp3Score, flacScore)
+	}
+}
+
+func TestScoringBalance(t *testing.T) {
+	cfg := scoringConfig{
+		tiers: []models.QualityTier{
+			{Format: "flac", Label: "FLAC"},
+			{Format: "mp3", MinBitrate: 320, Label: "MP3 320"},
+			{Format: "mp3", MinBitrate: 256, Label: "MP3 256"},
+		},
+		fallbackEnabled: true,
+	}
+
+	type source struct {
+		ext         string
+		bitRate     int
+		hasArtist   bool
+		freeSlot    bool
+		queueLength int
+	}
+
+	score := func(s source) int {
+		q, _ := tierBasedScore(s.ext, s.bitRate, cfg)
+		total := q
+		if s.hasArtist {
+			total += 20
+		}
+		if s.freeSlot {
+			total += 10
+		}
+		total += queueScore(s.queueLength)
+		return total
+	}
+
+	tests := []struct {
+		name   string
+		better source
+		worse  source
+	}{
+		{
+			name:   "higher tier always beats lower tier, same availability",
+			better: source{ext: ".flac", hasArtist: true, freeSlot: true, queueLength: 0},
+			worse:  source{ext: ".mp3", bitRate: 320, hasArtist: true, freeSlot: true, queueLength: 0},
+		},
+		{
+			name:   "higher tier wins even without artist match vs lower tier with artist",
+			better: source{ext: ".flac", hasArtist: false, freeSlot: true, queueLength: 0},
+			worse:  source{ext: ".mp3", bitRate: 320, hasArtist: true, freeSlot: true, queueLength: 0},
+		},
+		{
+			name:   "one tier gap can be overcome by all bonuses combined",
+			better: source{ext: ".mp3", bitRate: 320, hasArtist: true, freeSlot: true, queueLength: 0},
+			worse:  source{ext: ".flac", hasArtist: false, freeSlot: false, queueLength: 5},
+		},
+		{
+			name:   "artist match tips tie within same tier",
+			better: source{ext: ".mp3", bitRate: 320, hasArtist: true, freeSlot: false, queueLength: 5},
+			worse:  source{ext: ".mp3", bitRate: 320, hasArtist: false, freeSlot: false, queueLength: 5},
+		},
+		{
+			name:   "free slot tips tie within same tier and artist",
+			better: source{ext: ".mp3", bitRate: 320, hasArtist: true, freeSlot: true, queueLength: 5},
+			worse:  source{ext: ".mp3", bitRate: 320, hasArtist: true, freeSlot: false, queueLength: 5},
+		},
+		{
+			name:   "empty queue tips tie within same tier and artist",
+			better: source{ext: ".flac", hasArtist: true, freeSlot: false, queueLength: 0},
+			worse:  source{ext: ".flac", hasArtist: true, freeSlot: false, queueLength: 10},
+		},
+		{
+			name:   "two tier gap cannot be overcome by all bonuses combined",
+			better: source{ext: ".flac", hasArtist: false, freeSlot: false, queueLength: 15},
+			worse:  source{ext: ".mp3", bitRate: 256, hasArtist: true, freeSlot: true, queueLength: 0},
+		},
+		{
+			name:   "fallback format loses to lowest tier at equal availability",
+			better: source{ext: ".mp3", bitRate: 256, hasArtist: true, freeSlot: true, queueLength: 0},
+			worse:  source{ext: ".ogg", bitRate: 320, hasArtist: true, freeSlot: true, queueLength: 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			betterScore := score(tt.better)
+			worseScore := score(tt.worse)
+			if betterScore <= worseScore {
+				t.Errorf("expected %q (%d) > %q (%d)",
+					tt.name, betterScore, "worse", worseScore)
+			}
+		})
+	}
+}
+
+func TestInferExt(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"music/artist - track.flac", ".flac"},
+		{"@@user\\music\\track.mp3", ".mp3"},
+		{"no_extension", ""},
+		{"path/to/file.wav", ".wav"},
+	}
+
+	for _, tt := range tests {
+		got := inferExt(tt.name)
+		if got != tt.want {
+			t.Errorf("inferExt(%q) = %q, want %q", tt.name, got, tt.want)
+		}
 	}
 }

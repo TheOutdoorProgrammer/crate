@@ -1,4 +1,4 @@
-import type { Artist, Album, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchResult, LibrarySearchResult, TrackSearchResult } from '../types/index';
+import type { Artist, Album, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchResult, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown } from '../types/index';
 
 const BASE = '/api';
 
@@ -116,4 +116,12 @@ export const api = {
     request<LibrarySearchResult[]>(`/library/search?q=${encodeURIComponent(q)}`),
   searchBrowseArtistTracks: (id: string, q: string, provider?: string) =>
     request<{ tracks: TrackSearchResult[] }>(`/browse/artist/${id}/tracks?q=${encodeURIComponent(q)}${provider ? `&provider=${encodeURIComponent(provider)}` : ''}`),
+
+  listBlacklist: () => request<BlacklistEntry[]>('/blacklist'),
+  deleteBlacklistEntry: (id: number) =>
+    request<void>(`/blacklist/${id}`, { method: 'DELETE' }),
+
+  listCooldowns: () => request<UserCooldown[]>('/cooldowns'),
+  deleteCooldown: (id: number) =>
+    request<void>(`/cooldowns/${id}`, { method: 'DELETE' }),
 };

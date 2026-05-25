@@ -196,3 +196,19 @@ export interface TrackSearchResult {
   album_cover_url: string;
   album_year: number;
 }
+
+export interface BlacklistEntry {
+  id: number;
+  username: string;
+  filename: string;
+  reason: string;
+  created_at: string;
+}
+
+export interface UserCooldown {
+  id: number;
+  username: string;
+  reason: string;
+  expires_at: string;
+  created_at: string;
+}
