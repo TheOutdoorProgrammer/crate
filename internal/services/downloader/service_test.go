@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -196,7 +197,7 @@ func TestPickBestFileReturnsNilWhenAllBlacklisted(t *testing.T) {
 	}
 }
 
-func TestScoreAllFilesReturnsSortedResults(t *testing.T) {
+func TestScoreCandidatesReturnsSortedResults(t *testing.T) {
 	results := []slskd.SearchResult{
 		{
 			Username:          "user1",
@@ -215,23 +216,23 @@ func TestScoreAllFilesReturnsSortedResults(t *testing.T) {
 	}
 
 	track := &models.Track{Title: "Track", ArtistName: "Artist"}
-	scored := scoreAllFiles(results, track, nil)
+	scored := scoreCandidates(results, track, nil)
 
 	if len(scored) != 3 {
 		t.Fatalf("expected 3 results, got %d", len(scored))
 	}
-	if scored[0].Format != "FLAC" {
-		t.Errorf("expected FLAC first, got %s", scored[0].Format)
+	if filepath.Ext(scored[0].file.Filename) != ".flac" {
+		t.Errorf("expected FLAC first, got %s", filepath.Ext(scored[0].file.Filename))
 	}
 	for i := 1; i < len(scored); i++ {
-		if scored[i].Score > scored[i-1].Score {
+		if scored[i].score > scored[i-1].score {
 			t.Errorf("results not sorted: index %d score %d > index %d score %d",
-				i, scored[i].Score, i-1, scored[i-1].Score)
+				i, scored[i].score, i-1, scored[i-1].score)
 		}
 	}
 }
 
-func TestScoreAllFilesMarksBlacklisted(t *testing.T) {
+func TestScoreCandidatesExcludesBlacklisted(t *testing.T) {
 	results := []slskd.SearchResult{
 		{
 			Username: "user1",
@@ -246,13 +247,10 @@ func TestScoreAllFilesMarksBlacklisted(t *testing.T) {
 	}}
 
 	track := &models.Track{Title: "Track", ArtistName: "Artist"}
-	scored := scoreAllFiles(results, track, bl)
+	scored := scoreCandidates(results, track, bl)
 
-	if len(scored) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(scored))
-	}
-	if !scored[0].Blacklisted {
-		t.Error("expected result to be marked as blacklisted")
+	if len(scored) != 0 {
+		t.Errorf("expected 0 results when blacklisted, got %d", len(scored))
 	}
 }
 

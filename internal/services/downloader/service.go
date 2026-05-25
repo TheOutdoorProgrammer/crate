@@ -473,9 +473,38 @@ func (s *Service) ManualSearch(ctx context.Context, trackID int64) ([]ManualSear
 		return nil, fmt.Errorf("search failed")
 	}
 
-	results := scoreAllFiles(search.Responses, track, s.queries)
+	candidates := scoreCandidates(search.Responses, track, nil)
 
 	_ = s.slskd.DeleteSearch(ctx, search.ID)
+
+	results := make([]ManualSearchResult, 0, len(candidates))
+	for _, c := range candidates {
+		ext := strings.ToLower(filepath.Ext(c.file.Filename))
+		if ext == "" {
+			ext = inferExt(strings.ToLower(c.file.Filename))
+		}
+		format := strings.TrimPrefix(ext, ".")
+		if format == "mp3" && c.file.BitRate > 0 {
+			format = fmt.Sprintf("MP3 %dkbps", c.file.BitRate)
+		} else {
+			format = strings.ToUpper(format)
+		}
+
+		results = append(results, ManualSearchResult{
+			Username:    c.username,
+			Filename:    c.file.Filename,
+			Size:        c.file.Size,
+			BitRate:     c.file.BitRate,
+			SampleRate:  c.file.SampleRate,
+			BitDepth:    c.file.BitDepth,
+			Duration:    c.file.Length,
+			Format:      format,
+			Score:       c.score,
+			FreeSlot:    c.freeSlot,
+			QueueLength: c.queueLength,
+			Blacklisted: s.queries.IsBlacklisted(c.username, c.file.Filename),
+		})
+	}
 
 	return results, nil
 }
@@ -514,15 +543,18 @@ func (s *Service) ManualDownload(ctx context.Context, trackID int64, username, f
 	return nil
 }
 
-func scoreAllFiles(results []slskd.SearchResult, track *models.Track, bl blacklistChecker) []ManualSearchResult {
+func scoreCandidates(results []slskd.SearchResult, track *models.Track, bl blacklistChecker) []candidate {
 	titleLower := strings.ToLower(track.Title)
 	artistLower := strings.ToLower(track.ArtistName)
 
-	var scored []ManualSearchResult
+	var candidates []candidate
 
 	for _, result := range results {
 		for _, f := range result.Files {
 			if f.IsLocked {
+				continue
+			}
+			if bl != nil && bl.IsBlacklisted(result.Username, f.Filename) {
 				continue
 			}
 			nameLower := strings.ToLower(f.Filename)
@@ -552,37 +584,21 @@ func scoreAllFiles(results []slskd.SearchResult, track *models.Track, bl blackli
 				score += 10
 			}
 
-			blacklisted := bl != nil && bl.IsBlacklisted(result.Username, f.Filename)
-
-			format := strings.TrimPrefix(ext, ".")
-			if format == "mp3" && f.BitRate > 0 {
-				format = fmt.Sprintf("MP3 %dkbps", f.BitRate)
-			} else {
-				format = strings.ToUpper(format)
-			}
-
-			scored = append(scored, ManualSearchResult{
-				Username:    result.Username,
-				Filename:    f.Filename,
-				Size:        f.Size,
-				BitRate:     f.BitRate,
-				SampleRate:  f.SampleRate,
-				BitDepth:    f.BitDepth,
-				Duration:    f.Length,
-				Format:      format,
-				Score:       score,
-				FreeSlot:    result.HasFreeUploadSlot,
-				QueueLength: result.QueueLength,
-				Blacklisted: blacklisted,
+			candidates = append(candidates, candidate{
+				username:    result.Username,
+				file:        f,
+				score:       score,
+				freeSlot:    result.HasFreeUploadSlot,
+				queueLength: result.QueueLength,
 			})
 		}
 	}
 
-	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].Score > scored[j].Score
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
 	})
 
-	return scored
+	return candidates
 }
 
 // QualityTierRank returns the rank of a format/bitrate in the given tiers.
@@ -627,64 +643,23 @@ func derefInt(p *int) int {
 }
 
 type candidate struct {
-	username string
-	file     slskd.SearchFile
-	score    int
+	username    string
+	file        slskd.SearchFile
+	score       int
+	freeSlot    bool
+	queueLength int
 }
 
 type blacklistChecker interface {
 	IsBlacklisted(username, filename string) bool
 }
 
-// pickBestFile scores results: prefer FLAC > 320kbps mp3, free slot, high speed.
 func pickBestFile(results []slskd.SearchResult, track *models.Track, bl blacklistChecker) *candidate {
-	var best *candidate
-
-	titleLower := strings.ToLower(track.Title)
-	artistLower := strings.ToLower(track.ArtistName)
-
-	for _, result := range results {
-		for _, f := range result.Files {
-			if f.IsLocked {
-				continue
-			}
-			if bl != nil && bl.IsBlacklisted(result.Username, f.Filename) {
-				continue
-			}
-			nameLower := strings.ToLower(f.Filename)
-
-			if !strings.Contains(nameLower, titleLower) {
-				continue
-			}
-
-			ext := strings.ToLower(filepath.Ext(f.Filename))
-			if ext == "" {
-				ext = inferExt(nameLower)
-				if ext == "" {
-					continue
-				}
-			}
-			if !supportedExts[ext] {
-				continue
-			}
-
-			score := formatScore(ext, f.BitRate)
-			if strings.Contains(nameLower, artistLower) {
-				score += 30
-			}
-			if result.HasFreeUploadSlot {
-				score += 20
-			}
-			if result.QueueLength < 10 {
-				score += 10
-			}
-
-			if best == nil || score > best.score {
-				best = &candidate{username: result.Username, file: f, score: score}
-			}
-		}
+	candidates := scoreCandidates(results, track, bl)
+	if len(candidates) == 0 {
+		return nil
 	}
-	return best
+	return &candidates[0]
 }
 
 func inferExt(nameLower string) string {
