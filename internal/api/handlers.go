@@ -847,6 +847,7 @@ func (s *Server) handleDeleteDownload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "download not found")
 		return
 	}
+	s.downloader.CancelTransfer(r.Context(), dl)
 	if err := s.queries.DeleteDownload(id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete download")
 		return

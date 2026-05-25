@@ -135,6 +135,10 @@ func (c *Client) GetAllDownloads(ctx context.Context) ([]UserDownloads, error) {
 	return dirs, nil
 }
 
+func (c *Client) CancelDownload(ctx context.Context, username, id string) error {
+	return c.do(ctx, "DELETE", "/api/v0/transfers/downloads/"+username+"/"+id, nil, nil)
+}
+
 func (c *Client) GetDownload(ctx context.Context, username, id string) (*Transfer, error) {
 	var dirs []UserDownloads
 	if err := c.do(ctx, "GET", "/api/v0/transfers/downloads", nil, &dirs); err != nil {

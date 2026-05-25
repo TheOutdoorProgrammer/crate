@@ -58,6 +58,21 @@ func (s *Service) AddNotifier(n PostDownloadNotifier) {
 	s.notifiers = append(s.notifiers, n)
 }
 
+func (s *Service) CancelTransfer(ctx context.Context, d *models.DownloadQueueItem) {
+	if d.SlskdSearchID == nil {
+		return
+	}
+	switch d.Status {
+	case models.DownloadStatusDownloading:
+		parts := strings.SplitN(*d.SlskdSearchID, "|", 2)
+		if len(parts) == 2 {
+			_ = s.slskd.CancelDownload(ctx, parts[0], parts[1])
+		}
+	case models.DownloadStatusSearching:
+		_ = s.slskd.DeleteSearch(ctx, *d.SlskdSearchID)
+	}
+}
+
 type ProgressItem struct {
 	Username        string  `json:"username"`
 	Filename        string  `json:"filename"`
@@ -350,6 +365,7 @@ func (s *Service) checkDownload(ctx context.Context, d models.DownloadQueueItem)
 	if d.LastAttempt != nil {
 		lastProgress := mustParseTime(*d.LastAttempt)
 		if !lastProgress.IsZero() && time.Since(lastProgress) > staleDownloadTimeout {
+			_ = s.slskd.CancelDownload(ctx, username, transferID)
 			_ = s.queries.UpdateTrackStatus(d.TrackID, models.TrackStatusWanted)
 			_ = s.queries.BlacklistFile(username, transfer.Filename, "stale transfer: no progress for "+staleDownloadTimeout.String())
 			slog.Info("downloader: stale transfer, blacklisting", "username", username, "filename", filepath.Base(transfer.Filename), "download_id", d.ID)
