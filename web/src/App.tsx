@@ -11,6 +11,7 @@ import ArtistDetail from './pages/ArtistDetail';
 import AlbumDetail from './pages/AlbumDetail';
 import Downloads from './pages/Downloads';
 import Settings from './pages/Settings';
+import BlockedSources from './pages/BlockedSources';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,6 +38,7 @@ export default function App() {
             <Route path="/album/:id" element={<AlbumDetail />} />
             <Route path="/downloads" element={<Downloads />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/settings/blocked" element={<BlockedSources />} />
           </Route>
         </Routes>
       </BrowserRouter>

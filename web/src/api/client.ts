@@ -120,8 +120,10 @@ export const api = {
   listBlacklist: () => request<BlacklistEntry[]>('/blacklist'),
   deleteBlacklistEntry: (id: number) =>
     request<void>(`/blacklist/${id}`, { method: 'DELETE' }),
+  clearBlacklist: () => request<void>('/blacklist', { method: 'DELETE' }),
 
   listCooldowns: () => request<UserCooldown[]>('/cooldowns'),
   deleteCooldown: (id: number) =>
     request<void>(`/cooldowns/${id}`, { method: 'DELETE' }),
+  clearCooldowns: () => request<void>('/cooldowns', { method: 'DELETE' }),
 };

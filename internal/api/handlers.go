@@ -1048,6 +1048,14 @@ func (s *Server) handleDeleteBlacklistEntry(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleClearBlacklist(w http.ResponseWriter, r *http.Request) {
+	if err := s.queries.ClearBlacklist(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear blacklist")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleListCooldowns(w http.ResponseWriter, r *http.Request) {
 	cooldowns, err := s.queries.ListActiveCooldowns()
 	if err != nil {
@@ -1065,6 +1073,14 @@ func (s *Server) handleDeleteCooldown(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.queries.DeleteCooldown(id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete cooldown")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleClearCooldowns(w http.ResponseWriter, r *http.Request) {
+	if err := s.queries.ClearCooldowns(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear cooldowns")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

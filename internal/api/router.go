@@ -126,11 +126,13 @@ func (s *Server) setupRouter() chi.Router {
 
 		r.Route("/blacklist", func(r chi.Router) {
 			r.Get("/", s.handleListBlacklist)
+			r.Delete("/", s.handleClearBlacklist)
 			r.Delete("/{id}", s.handleDeleteBlacklistEntry)
 		})
 
 		r.Route("/cooldowns", func(r chi.Router) {
 			r.Get("/", s.handleListCooldowns)
+			r.Delete("/", s.handleClearCooldowns)
 			r.Delete("/{id}", s.handleDeleteCooldown)
 		})
 

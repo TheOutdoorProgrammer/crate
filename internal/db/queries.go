@@ -809,6 +809,11 @@ func (q *Queries) DeleteBlacklistEntry(id int64) error {
 	return err
 }
 
+func (q *Queries) ClearBlacklist() error {
+	_, err := q.db.Exec(`DELETE FROM slskd_blacklist`)
+	return err
+}
+
 // Cooldowns (shadow banning)
 
 func (q *Queries) CooldownUser(username, reason string, duration time.Duration) error {
@@ -852,6 +857,11 @@ func (q *Queries) ListActiveCooldowns() ([]models.UserCooldown, error) {
 
 func (q *Queries) DeleteCooldown(id int64) error {
 	_, err := q.db.Exec(`DELETE FROM user_cooldowns WHERE id = ?`, id)
+	return err
+}
+
+func (q *Queries) ClearCooldowns() error {
+	_, err := q.db.Exec(`DELETE FROM user_cooldowns`)
 	return err
 }
 
