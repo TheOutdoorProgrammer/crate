@@ -325,17 +325,15 @@ function DownloadRow({ dl, onRetry, onDismiss, onSelect }: { dl: DownloadQueueIt
           Retry
         </button>
       )}
-      {(dl.status === 'failed' || dl.status === 'complete' || dl.status === 'pending') && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onDismiss(dl.id); }}
-          className="text-zinc-600 active:text-red-400 transition-colors shrink-0"
-          title="Dismiss"
-        >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-          </svg>
-        </button>
-      )}
+      <button
+        onClick={(e) => { e.stopPropagation(); onDismiss(dl.id); }}
+        className="text-zinc-600 active:text-red-400 transition-colors shrink-0"
+        title={dl.status === 'downloading' || dl.status === 'searching' ? 'Cancel' : 'Dismiss'}
+      >
+        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+        </svg>
+      </button>
     </div>
   );
 }

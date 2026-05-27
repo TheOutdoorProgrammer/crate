@@ -296,7 +296,21 @@ export default function AlbumDetail() {
                       )}
                     </div>
                     {track.status === 'owned' && (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase bg-green-900/50 text-green-400">owned</span>
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startManualSearch(track.id); }}
+                          disabled={manualSearching && isManualOpen}
+                          className={`shrink-0 transition-colors ${
+                            isManualOpen ? 'text-blue-400' : 'text-zinc-500 active:text-white'
+                          }`}
+                          title="Manual search"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+                          </svg>
+                        </button>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase bg-green-900/50 text-green-400">owned</span>
+                      </>
                     )}
                     {track.status === 'downloading' && (
                       <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase bg-blue-900/50 text-blue-400">downloading</span>
