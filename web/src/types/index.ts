@@ -169,6 +169,7 @@ export interface ManualSearchResult {
   free_slot: boolean;
   queue_length: number;
   blacklisted: boolean;
+  negative_match: boolean;
 }
 
 export interface ProviderInfo {

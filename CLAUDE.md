@@ -97,6 +97,8 @@ Design invariants (enforced by `TestScoringBalance`):
 
 The `quality_fallback_enabled` setting (default true) controls whether files outside configured tiers are accepted at all.
 
+**Negative keywords**: user-configurable list stored as JSON array in the `negative_keywords` setting (e.g. `["acapella", "instrumental"]`). Auto-downloads skip files whose filename matches any keyword. Manual search still returns them but marks `negative_match: true` so the UI can dim them. Case-insensitive matching against the lowercased filename.
+
 ## Quality Upgrades
 
 - Priority-ordered quality tiers stored as JSON in settings (`quality_tiers`), default: FLAC > MP3 320 > MP3 256

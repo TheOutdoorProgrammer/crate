@@ -592,6 +592,83 @@ func TestScoringBalance(t *testing.T) {
 	}
 }
 
+func TestMatchesNegativeKeyword(t *testing.T) {
+	tests := []struct {
+		filename string
+		keywords []string
+		want     bool
+	}{
+		{"music/artist - track (acapella).flac", []string{"acapella"}, true},
+		{"music/artist - track (acapella).flac", []string{"Acapella"}, true},
+		{"music/artist - track.flac", []string{"acapella"}, false},
+		{"music/artist - track (acapella remix).mp3", []string{"acapella", "instrumental"}, true},
+		{"music/artist - track (instrumental).mp3", []string{"acapella", "instrumental"}, true},
+		{"music/artist - track.mp3", []string{"acapella", "instrumental"}, false},
+		{"music/artist - track.flac", nil, false},
+		{"music/artist - track.flac", []string{}, false},
+	}
+
+	for _, tt := range tests {
+		got := matchesNegativeKeyword(tt.filename, tt.keywords)
+		if got != tt.want {
+			t.Errorf("matchesNegativeKeyword(%q, %v) = %v, want %v", tt.filename, tt.keywords, got, tt.want)
+		}
+	}
+}
+
+func TestScoreCandidatesExcludesNegativeKeywords(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username:          "user1",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Track (Acapella).flac", Size: 30000000},
+				{Filename: "music/Artist - Track.flac", Size: 30000000},
+			},
+		},
+	}
+
+	track := &models.Track{Title: "Track", ArtistName: "Artist"}
+	cfg := scoringConfig{
+		fallbackEnabled:  true,
+		negativeKeywords: []string{"acapella"},
+		excludeNegative:  true,
+	}
+	scored := scoreCandidates(results, track, nil, cfg)
+
+	if len(scored) != 1 {
+		t.Fatalf("expected 1 result (acapella excluded), got %d", len(scored))
+	}
+	if scored[0].file.Filename != "music/Artist - Track.flac" {
+		t.Errorf("expected non-acapella file, got %s", scored[0].file.Filename)
+	}
+}
+
+func TestScoreCandidatesReturnsNegativeKeywordsWhenNotExcluding(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username:          "user1",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/Artist - Track (Acapella).flac", Size: 30000000},
+				{Filename: "music/Artist - Track.flac", Size: 30000000},
+			},
+		},
+	}
+
+	track := &models.Track{Title: "Track", ArtistName: "Artist"}
+	cfg := scoringConfig{
+		fallbackEnabled:  true,
+		negativeKeywords: []string{"acapella"},
+		excludeNegative:  false,
+	}
+	scored := scoreCandidates(results, track, nil, cfg)
+
+	if len(scored) != 2 {
+		t.Fatalf("expected 2 results (manual search keeps negative matches), got %d", len(scored))
+	}
+}
+
 func TestInferExt(t *testing.T) {
 	tests := []struct {
 		name string

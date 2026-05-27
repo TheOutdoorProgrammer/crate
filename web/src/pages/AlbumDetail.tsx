@@ -384,6 +384,8 @@ export default function AlbumDetail() {
                               className={`w-full text-left rounded-lg px-2.5 py-2 transition-colors ${
                                 r.blacklisted
                                   ? 'opacity-40 cursor-not-allowed bg-zinc-800/30'
+                                  : r.negative_match
+                                  ? 'opacity-60 bg-zinc-800/30 active:bg-zinc-700'
                                   : 'bg-zinc-800/50 active:bg-zinc-700'
                               }`}
                             >
@@ -397,6 +399,7 @@ export default function AlbumDetail() {
                                     {r.free_slot && ' · free slot'}
                                     {r.queue_length > 0 && ` · ${r.queue_length} queued`}
                                     {r.blacklisted && ' · blacklisted'}
+                                    {r.negative_match && ' · negative keyword'}
                                   </p>
                                 </div>
                                 <span className={`text-[10px] font-medium tabular-nums shrink-0 ${

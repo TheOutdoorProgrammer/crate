@@ -50,6 +50,8 @@ export default function Settings() {
   const [form, setForm] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
   const [tiers, setTiers] = useState<QualityTier[]>([]);
+  const [negativeKeywords, setNegativeKeywords] = useState<string[]>([]);
+  const [newKeyword, setNewKeyword] = useState('');
 
   const { data: settings } = useQuery({
     queryKey: ['settings'],
@@ -75,6 +77,11 @@ export default function Settings() {
           setTiers(JSON.parse(settings.quality_tiers));
         } catch { /* ignore */ }
       }
+      if (settings.negative_keywords) {
+        try {
+          setNegativeKeywords(JSON.parse(settings.negative_keywords));
+        } catch { /* ignore */ }
+      }
     }
   }, [settings]);
 
@@ -83,6 +90,7 @@ export default function Settings() {
       ...form,
       quality_tiers: JSON.stringify(tiers),
       quality_fallback_enabled: form.quality_fallback_enabled ?? 'true',
+      negative_keywords: JSON.stringify(negativeKeywords),
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
@@ -286,6 +294,58 @@ export default function Settings() {
         <p className="text-[11px] text-zinc-600 mt-1 ml-6">
           When disabled, only files matching a configured tier will be downloaded
         </p>
+      </SettingsSection>
+
+      <SettingsSection title="Negative Keywords">
+        <p className="text-[11px] text-zinc-500 mb-3">
+          Files matching these keywords are skipped during auto-download but still shown in manual search results.
+        </p>
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {negativeKeywords.map((kw, i) => (
+            <span key={i} className="inline-flex items-center gap-1 bg-zinc-800/50 rounded-lg px-2.5 py-1.5 text-sm">
+              {kw}
+              <button
+                onClick={() => setNegativeKeywords(negativeKeywords.filter((_, j) => j !== i))}
+                className="text-zinc-600 active:text-red-400 transition-colors"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newKeyword}
+            onChange={(e) => setNewKeyword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && newKeyword.trim()) {
+                e.preventDefault();
+                const kw = newKeyword.trim().toLowerCase();
+                if (!negativeKeywords.includes(kw)) {
+                  setNegativeKeywords([...negativeKeywords, kw]);
+                }
+                setNewKeyword('');
+              }
+            }}
+            placeholder="e.g. acapella"
+            className="flex-1 bg-zinc-800 rounded-lg px-3 py-2 text-sm placeholder-zinc-600 outline-none focus:ring-2 focus:ring-zinc-600"
+          />
+          <button
+            onClick={() => {
+              const kw = newKeyword.trim().toLowerCase();
+              if (kw && !negativeKeywords.includes(kw)) {
+                setNegativeKeywords([...negativeKeywords, kw]);
+              }
+              setNewKeyword('');
+            }}
+            className="px-3 py-2 bg-zinc-800 text-zinc-400 rounded-lg text-xs font-medium active:bg-zinc-700 transition-colors"
+          >
+            + Add
+          </button>
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Blocked Sources">

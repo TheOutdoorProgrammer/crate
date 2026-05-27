@@ -238,6 +238,12 @@ func (s *Service) getScoringConfig() scoringConfig {
 	if v, err := s.queries.GetSetting("quality_fallback_enabled"); err == nil && v == "false" {
 		cfg.fallbackEnabled = false
 	}
+	if kwJSON, err := s.queries.GetSetting("negative_keywords"); err == nil && kwJSON != "" {
+		var keywords []string
+		if json.Unmarshal([]byte(kwJSON), &keywords) == nil {
+			cfg.negativeKeywords = keywords
+		}
+	}
 	return cfg
 }
 
@@ -296,7 +302,9 @@ func (s *Service) checkSearch(ctx context.Context, d models.DownloadQueueItem) e
 		return err
 	}
 
-	best := pickBestFile(search.Responses, track, s.queries, s.getScoringConfig())
+	cfg := s.getScoringConfig()
+	cfg.excludeNegative = true
+	best := pickBestFile(search.Responses, track, s.queries, cfg)
 	if best == nil {
 		_ = s.slskd.DeleteSearch(ctx, *d.SlskdSearchID)
 		errStr := "no suitable file found"
@@ -504,6 +512,7 @@ type ManualSearchResult struct {
 	FreeSlot       bool   `json:"free_slot"`
 	QueueLength    int    `json:"queue_length"`
 	Blacklisted    bool   `json:"blacklisted"`
+	NegativeMatch  bool   `json:"negative_match"`
 }
 
 // ManualSearch runs a slskd search for a track and returns all scored results.
@@ -555,18 +564,19 @@ func (s *Service) ManualSearch(ctx context.Context, trackID int64) ([]ManualSear
 		}
 
 		results = append(results, ManualSearchResult{
-			Username:    c.username,
-			Filename:    c.file.Filename,
-			Size:        c.file.Size,
-			BitRate:     c.file.BitRate,
-			SampleRate:  c.file.SampleRate,
-			BitDepth:    c.file.BitDepth,
-			Duration:    c.file.Length,
-			Format:      format,
-			Score:       c.score,
-			FreeSlot:    c.freeSlot,
-			QueueLength: c.queueLength,
-			Blacklisted: s.queries.IsBlacklisted(c.username, c.file.Filename),
+			Username:      c.username,
+			Filename:      c.file.Filename,
+			Size:          c.file.Size,
+			BitRate:       c.file.BitRate,
+			SampleRate:    c.file.SampleRate,
+			BitDepth:      c.file.BitDepth,
+			Duration:      c.file.Length,
+			Format:        format,
+			Score:         c.score,
+			FreeSlot:      c.freeSlot,
+			QueueLength:   c.queueLength,
+			Blacklisted:   s.queries.IsBlacklisted(c.username, c.file.Filename),
+			NegativeMatch: matchesNegativeKeyword(strings.ToLower(c.file.Filename), cfg.negativeKeywords),
 		})
 	}
 
@@ -626,6 +636,9 @@ func scoreCandidates(results []slskd.SearchResult, track *models.Track, ac avail
 			}
 			nameLower := strings.ToLower(f.Filename)
 			if !strings.Contains(nameLower, titleLower) {
+				continue
+			}
+			if cfg.excludeNegative && matchesNegativeKeyword(nameLower, cfg.negativeKeywords) {
 				continue
 			}
 
@@ -740,8 +753,10 @@ type availabilityChecker interface {
 }
 
 type scoringConfig struct {
-	tiers           []models.QualityTier
-	fallbackEnabled bool
+	tiers            []models.QualityTier
+	fallbackEnabled  bool
+	negativeKeywords []string
+	excludeNegative  bool
 }
 
 func pickBestFile(results []slskd.SearchResult, track *models.Track, ac availabilityChecker, cfg scoringConfig) *candidate {
@@ -815,4 +830,13 @@ func fallbackScore(ext string, bitRate int) int {
 
 func queueScore(queueLength int) int {
 	return int(15.0 / float64(1+queueLength))
+}
+
+func matchesNegativeKeyword(filenameLower string, keywords []string) bool {
+	for _, kw := range keywords {
+		if strings.Contains(filenameLower, strings.ToLower(kw)) {
+			return true
+		}
+	}
+	return false
 }

@@ -612,6 +612,11 @@
               <td>Whether to accept files outside configured quality tiers. When disabled, only files matching a tier are downloaded.</td>
             </tr>
             <tr>
+              <td><code>negative_keywords</code></td>
+              <td><code>[]</code></td>
+              <td>JSON array of keywords (e.g. <code>["acapella", "instrumental"]</code>). Files matching any keyword are skipped during auto-download. Manual search still shows them, marked as negative matches.</td>
+            </tr>
+            <tr>
               <td><code>max_concurrent_slskd</code></td>
               <td><code>10</code></td>
               <td>Maximum number of simultaneous downloads from Soulseek.</td>
@@ -810,6 +815,10 @@
 
       <div class="callout">
         <strong>Quality fallback:</strong> When <code>quality_fallback_enabled</code> is set to <code>false</code>, files that don't match any configured tier are rejected entirely. When enabled (default), they receive a reduced score below the lowest tier.
+      </div>
+
+      <div class="callout">
+        <strong>Negative keywords:</strong> Configure keywords like <code>acapella</code> or <code>instrumental</code> in Settings. Files matching any keyword are automatically skipped during scheduled downloads. Manual search still returns them (dimmed, labeled "negative keyword") so you can override when needed.
       </div>
 
       <!-- Quality Upgrades -->
