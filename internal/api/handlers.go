@@ -1267,13 +1267,19 @@ func deleteTrackFile(libraryDir string, track *models.Track) {
 	if track.FilePath == nil || libraryDir == "" {
 		return
 	}
-	fullPath := filepath.Join(libraryDir, *track.FilePath)
+	fp := *track.FilePath
+	var fullPath string
+	if filepath.IsAbs(fp) {
+		fullPath = fp
+	} else {
+		fullPath = filepath.Join(libraryDir, fp)
+	}
 	cleaned := filepath.Clean(fullPath)
 	if !strings.HasPrefix(cleaned, filepath.Clean(libraryDir)+string(filepath.Separator)) {
 		slog.Error("reject: path escapes library dir", "path", cleaned)
 		return
 	}
-	if err := os.Remove(cleaned); err != nil && !os.IsNotExist(err) { // #nosec G703 -- path validated above
+	if err := os.Remove(cleaned); err != nil {
 		slog.Error("reject: failed to delete file", "path", cleaned, "error", err)
 	} else {
 		slog.Info("reject: deleted file", "path", cleaned)

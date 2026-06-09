@@ -95,7 +95,11 @@ func (s *Service) Organize(track *models.Track) error {
 		slog.Warn("organizer: tagging failed", "dest", dest, "error", err)
 	}
 
-	return s.queries.UpdateTrackFilePath(track.ID, dest)
+	relPath, err := filepath.Rel(s.libraryDir, dest)
+	if err != nil {
+		return fmt.Errorf("organizer: relative path: %w", err)
+	}
+	return s.queries.UpdateTrackFilePath(track.ID, relPath)
 }
 
 var unsafeChars = regexp.MustCompile(`[<>:"/\\|?*]`)
