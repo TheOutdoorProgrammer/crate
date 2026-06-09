@@ -385,6 +385,85 @@ func TestBrowseAlbum(t *testing.T) {
 	}
 }
 
+func TestBrowseAlbumWatchedStatus(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Unwatched album: album_watched=false, no library_id
+	w := env.do("GET", "/api/browse/album/2000", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	result := decode[map[string]any](t, w)
+	if result["album_watched"] != false {
+		t.Errorf("unwatched album should have album_watched=false")
+	}
+	if result["library_id"] != nil {
+		t.Errorf("unwatched album should have library_id=nil, got %v", result["library_id"])
+	}
+
+	// Watch a single track — album record exists but not all tracks watched
+	w = env.do("POST", "/api/watch/track/3000", `{
+		"artist_provider_id": "1000",
+		"artist_name": "Test Artist",
+		"artist_image_url": "",
+		"album_provider_id": "2000",
+		"album_title": "Album One",
+		"album_cover_url": "",
+		"album_year": 2023,
+		"title": "Track One",
+		"track_number": 1,
+		"disc_number": 1,
+		"duration_ms": 200000
+	}`)
+	if w.Code != 201 {
+		t.Fatalf("watch track: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = env.do("GET", "/api/browse/album/2000", "")
+	result = decode[map[string]any](t, w)
+	if result["album_watched"] != false {
+		t.Errorf("partially watched album should have album_watched=false")
+	}
+	if result["library_id"] == nil {
+		t.Errorf("partially watched album should have a library_id")
+	}
+	watchedIDs := result["watched_track_ids"].([]any)
+	if len(watchedIDs) != 1 {
+		t.Errorf("expected 1 watched track, got %d", len(watchedIDs))
+	}
+
+	// Watch the second track too — now all provider tracks are watched
+	w = env.do("POST", "/api/watch/track/3001", `{
+		"artist_provider_id": "1000",
+		"artist_name": "Test Artist",
+		"artist_image_url": "",
+		"album_provider_id": "2000",
+		"album_title": "Album One",
+		"album_cover_url": "",
+		"album_year": 2023,
+		"title": "Track Two",
+		"track_number": 2,
+		"disc_number": 1,
+		"duration_ms": 180000
+	}`)
+	if w.Code != 201 {
+		t.Fatalf("watch track 2: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = env.do("GET", "/api/browse/album/2000", "")
+	result = decode[map[string]any](t, w)
+	if result["album_watched"] != true {
+		t.Errorf("fully watched album should have album_watched=true")
+	}
+	if result["library_id"] == nil {
+		t.Errorf("fully watched album should have a library_id")
+	}
+	watchedIDs = result["watched_track_ids"].([]any)
+	if len(watchedIDs) != 2 {
+		t.Errorf("expected 2 watched tracks, got %d", len(watchedIDs))
+	}
+}
+
 func TestWatchArtistCreatesFullDiscography(t *testing.T) {
 	env := newTestEnv(t)
 	w := env.do("POST", "/api/watch/artist/1000", `{}`)

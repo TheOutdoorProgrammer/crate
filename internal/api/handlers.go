@@ -204,6 +204,13 @@ func (s *Server) handleBrowseAlbum(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	albumWatched := existingAlbum != nil && len(album.Tracks) > 0 && len(watchedTrackIDs) >= len(album.Tracks)
+
+	var libraryID *int64
+	if existingAlbum != nil {
+		libraryID = &existingAlbum.ID
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":                album.Id,
 		"title":             album.Title,
@@ -212,8 +219,9 @@ func (s *Server) handleBrowseAlbum(w http.ResponseWriter, r *http.Request) {
 		"cover_url":         album.CoverUrl,
 		"tracks":            album.Tracks,
 		"metadata":          album.Metadata,
-		"album_watched":     existingAlbum != nil,
+		"album_watched":     albumWatched,
 		"watched_track_ids": watchedTrackIDs,
+		"library_id":        libraryID,
 	})
 }
 
