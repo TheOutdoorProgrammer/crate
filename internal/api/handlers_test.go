@@ -1222,26 +1222,48 @@ func TestManualSearchTrack(t *testing.T) {
 	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
 	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
 
+	// Start search — returns search ID
 	w := env.do("POST", fmt.Sprintf("/api/tracks/%d/search", tracks[0].ID), "")
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
+	startResp := decode[map[string]any](t, w)
+	searchID, ok := startResp["search_id"].(string)
+	if !ok || searchID == "" {
+		t.Fatal("expected search_id in response")
+	}
 
-	results := decode[[]map[string]any](t, w)
+	// Poll for results
+	w = env.do("GET", fmt.Sprintf("/api/tracks/%d/search/%s", tracks[0].ID, searchID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	pollResp := decode[map[string]any](t, w)
+	results := pollResp["results"].([]any)
 	if len(results) == 0 {
 		t.Fatal("expected at least one result")
 	}
+	if !pollResp["is_complete"].(bool) {
+		t.Error("expected is_complete to be true (fake slskd returns complete)")
+	}
+
 	// Results should be sorted by score descending
 	if len(results) >= 2 {
-		score0 := results[0]["score"].(float64)
-		score1 := results[1]["score"].(float64)
+		score0 := results[0].(map[string]any)["score"].(float64)
+		score1 := results[1].(map[string]any)["score"].(float64)
 		if score0 < score1 {
 			t.Errorf("expected results sorted by score desc, got %v then %v", score0, score1)
 		}
 	}
-	// First result should have username
-	if results[0]["username"] == "" {
+	first := results[0].(map[string]any)
+	if first["username"] == "" {
 		t.Error("expected username on result")
+	}
+
+	// Cleanup
+	w = env.do("DELETE", fmt.Sprintf("/api/tracks/%d/search/%s", tracks[0].ID, searchID), "")
+	if w.Code != 204 {
+		t.Fatalf("expected 204 on cleanup, got %d", w.Code)
 	}
 }
 

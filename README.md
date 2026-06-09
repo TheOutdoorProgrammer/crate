@@ -180,3 +180,4 @@ Design decisions with meaningful trade-offs are documented as ADRs in [`docs/adr
 | ADR | Decision |
 |-----|----------|
 | [0001](docs/adr/0001-artist-matching-fallback.md) | Require artist match in download file selection, fall back to title-only for flat libraries |
+| [0002](docs/adr/0002-async-manual-search.md) | Async manual search with frontend polling instead of blocking 30s request |

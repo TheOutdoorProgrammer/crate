@@ -76,6 +76,16 @@ For external providers: `CRATE_PROVIDERS=spotify:external:192.168.1.10:50053`
 - **API management**: `GET/DELETE /api/blacklist/{id}`, `GET/DELETE /api/cooldowns/{id}` for viewing and removing entries. Also exposed in the Settings UI under "Blocked Sources".
 - **Track rejection**: `POST /api/tracks/{id}/reject` (by Crate track ID) or `POST /api/tracks/reject` with `{"artist":"...","title":"..."}` (by name). Deletes the file from the library, blacklists the source if `downloaded_from` and `downloaded_filename` are both known, resets track to wanted, re-enqueues for download, and triggers a Navidrome library scan. Tracks downloaded before v1.11.0 won't have `downloaded_filename` — reject still works but skips the blacklist step.
 
+## Manual Search (async)
+
+Manual search is async — the frontend starts a search, then polls for results as peers respond. See [ADR-0002](docs/adr/0002-async-manual-search.md).
+
+1. `POST /api/tracks/{id}/search` → `{search_id, track_id}` — starts slskd search, returns immediately
+2. `GET /api/tracks/{id}/search/{searchId}` → `{results: [...], is_complete: bool, file_count: int}` — poll for scored results
+3. `DELETE /api/tracks/{id}/search/{searchId}` — cleanup when done
+
+Frontend polls every 2s, shows results as they arrive with a spinner until `is_complete`. Cleanup runs on unmount and when the user closes the search panel.
+
 ## Pagination
 
 - Search API: `GET /api/search?q=...&limit=25&offset=0` returns `{artists: [...], total: N}`
@@ -181,6 +191,7 @@ Design decisions with non-obvious trade-offs are documented as ADRs in `docs/adr
 | ADR | Area | Decision |
 |-----|------|----------|
 | [0001](docs/adr/0001-artist-matching-fallback.md) | Downloader | Require artist match in file selection; fall back to title-only only when no files mention the artist at all |
+| [0002](docs/adr/0002-async-manual-search.md) | API/Frontend | Async manual search with frontend polling instead of blocking 30s request |
 
 When making a decision that involves a meaningful trade-off (especially "we tried X but chose Y because Z"), add a new ADR.
 

@@ -172,6 +172,17 @@ export interface ManualSearchResult {
   negative_match: boolean;
 }
 
+export interface ManualSearchResponse {
+  results: ManualSearchResult[];
+  is_complete: boolean;
+  file_count: number;
+}
+
+export interface ManualSearchStart {
+  search_id: string;
+  track_id: number;
+}
+
 export interface ProviderInfo {
   name: string;
   display_name: string;

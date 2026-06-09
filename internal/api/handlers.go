@@ -19,7 +19,6 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
-	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
 	pb "github.com/TheOutdoorProgrammer/crate/proto/provider"
 )
 
@@ -766,21 +765,47 @@ func (s *Server) handleQueueAlbumTracks(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]int{"queued": queued})
 }
 
-func (s *Server) handleManualSearch(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStartManualSearch(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	results, err := s.downloader.ManualSearch(r.Context(), id)
+	searchID, err := s.downloader.StartManualSearch(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "search failed: "+err.Error())
 		return
 	}
-	if results == nil {
-		results = []downloader.ManualSearchResult{}
+	writeJSON(w, http.StatusOK, map[string]any{"search_id": searchID, "track_id": id})
+}
+
+func (s *Server) handlePollManualSearch(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
 	}
-	writeJSON(w, http.StatusOK, results)
+	searchID := chi.URLParam(r, "searchId")
+	if searchID == "" {
+		writeError(w, http.StatusBadRequest, "missing search id")
+		return
+	}
+	resp, err := s.downloader.PollManualSearch(r.Context(), id, searchID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "poll failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleDeleteManualSearch(w http.ResponseWriter, r *http.Request) {
+	searchID := chi.URLParam(r, "searchId")
+	if searchID == "" {
+		writeError(w, http.StatusBadRequest, "missing search id")
+		return
+	}
+	s.downloader.CleanupSearch(r.Context(), searchID)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleManualDownload(w http.ResponseWriter, r *http.Request) {

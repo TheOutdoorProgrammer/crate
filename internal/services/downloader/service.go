@@ -521,40 +521,56 @@ type ManualSearchResult struct {
 }
 
 // ManualSearch runs a slskd search for a track and returns all scored results.
-func (s *Service) ManualSearch(ctx context.Context, trackID int64) ([]ManualSearchResult, error) {
+// StartManualSearch kicks off an slskd search and returns the search ID immediately.
+func (s *Service) StartManualSearch(ctx context.Context, trackID int64) (string, error) {
+	track, err := s.queries.GetTrackWithMeta(trackID)
+	if err != nil {
+		return "", err
+	}
+	query := track.ArtistName + " " + track.Title
+	search, err := s.slskd.StartSearch(ctx, query)
+	if err != nil {
+		return "", fmt.Errorf("start search: %w", err)
+	}
+	return search.ID, nil
+}
+
+// ManualSearchResponse holds scored results plus completion status.
+type ManualSearchResponse struct {
+	Results    []ManualSearchResult `json:"results"`
+	IsComplete bool                 `json:"is_complete"`
+	FileCount  int                  `json:"file_count"`
+}
+
+// PollManualSearch returns the current scored results for an in-progress search.
+func (s *Service) PollManualSearch(ctx context.Context, trackID int64, searchID string) (*ManualSearchResponse, error) {
 	track, err := s.queries.GetTrackWithMeta(trackID)
 	if err != nil {
 		return nil, err
 	}
 
-	query := track.ArtistName + " " + track.Title
-	search, err := s.slskd.StartSearch(ctx, query)
+	search, err := s.slskd.GetSearch(ctx, searchID)
 	if err != nil {
-		return nil, fmt.Errorf("start search: %w", err)
-	}
-
-	// Poll until complete (max ~30s)
-	for i := 0; i < 15; i++ {
-		search, err = s.slskd.GetSearch(ctx, search.ID)
-		if err != nil {
-			break
-		}
-		if search.IsComplete {
-			break
-		}
-		time.Sleep(2 * time.Second)
-	}
-
-	if search == nil {
-		return nil, fmt.Errorf("search failed")
+		return nil, fmt.Errorf("get search: %w", err)
 	}
 
 	cfg := s.getScoringConfig()
 	cfg.fallbackEnabled = true
 	candidates := scoreCandidates(search.Responses, track, nil, cfg)
 
-	_ = s.slskd.DeleteSearch(ctx, search.ID)
+	return &ManualSearchResponse{
+		Results:    formatCandidates(candidates, s.queries, cfg.negativeKeywords),
+		IsComplete: search.IsComplete,
+		FileCount:  search.FileCount,
+	}, nil
+}
 
+// CleanupSearch deletes an slskd search.
+func (s *Service) CleanupSearch(ctx context.Context, searchID string) {
+	_ = s.slskd.DeleteSearch(ctx, searchID)
+}
+
+func formatCandidates(candidates []candidate, q *db.Queries, negativeKeywords []string) []ManualSearchResult {
 	results := make([]ManualSearchResult, 0, len(candidates))
 	for _, c := range candidates {
 		ext := strings.ToLower(filepath.Ext(c.file.Filename))
@@ -580,12 +596,11 @@ func (s *Service) ManualSearch(ctx context.Context, trackID int64) ([]ManualSear
 			Score:         c.score,
 			FreeSlot:      c.freeSlot,
 			QueueLength:   c.queueLength,
-			Blacklisted:   s.queries.IsBlacklisted(c.username, c.file.Filename),
-			NegativeMatch: matchesNegativeKeyword(strings.ToLower(c.file.Filename), cfg.negativeKeywords),
+			Blacklisted:   q.IsBlacklisted(c.username, c.file.Filename),
+			NegativeMatch: matchesNegativeKeyword(strings.ToLower(c.file.Filename), negativeKeywords),
 		})
 	}
-
-	return results, nil
+	return results
 }
 
 // ManualDownload starts a download of a specific file from a specific user.

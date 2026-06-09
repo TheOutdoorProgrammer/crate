@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -102,22 +102,75 @@ export default function AlbumDetail() {
   const [manualSearchTrackId, setManualSearchTrackId] = useState<number | null>(null);
   const [manualResults, setManualResults] = useState<ManualSearchResult[]>([]);
   const [manualSearching, setManualSearching] = useState(false);
+  const [manualSearchComplete, setManualSearchComplete] = useState(false);
+  const [manualFileCount, setManualFileCount] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeSearchRef = useRef<{ trackId: number; searchId: string } | null>(null);
+
+  const cleanupSearch = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (activeSearchRef.current) {
+      api.deleteManualSearch(activeSearchRef.current.trackId, activeSearchRef.current.searchId).catch(() => {});
+      activeSearchRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => cleanupSearch, [cleanupSearch]);
 
   const startManualSearch = async (trackId: number) => {
     if (manualSearchTrackId === trackId) {
+      cleanupSearch();
       setManualSearchTrackId(null);
+
       setManualResults([]);
+      setManualSearchComplete(false);
+      setManualFileCount(0);
       return;
     }
+    cleanupSearch();
     setManualSearchTrackId(trackId);
     setManualResults([]);
     setManualSearching(true);
+    setManualSearchComplete(false);
+    setManualFileCount(0);
     try {
-      const results = await api.manualSearchTrack(trackId);
-      setManualResults(results);
+      const { search_id } = await api.startManualSearch(trackId);
+      activeSearchRef.current = { trackId, searchId: search_id };
+
+      let done = false;
+      const poll = async () => {
+        try {
+          const resp = await api.pollManualSearch(trackId, search_id);
+          setManualResults(resp.results);
+          setManualFileCount(resp.file_count);
+          if (resp.is_complete) {
+            done = true;
+            if (pollRef.current) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+            }
+            setManualSearching(false);
+            setManualSearchComplete(true);
+          }
+        } catch {
+          done = true;
+          if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+          setManualSearching(false);
+        }
+      };
+
+      await poll();
+      if (!done) {
+        pollRef.current = setInterval(poll, 2000);
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Search failed', 'error');
-    } finally {
       setManualSearching(false);
     }
   };
@@ -127,8 +180,12 @@ export default function AlbumDetail() {
       api.manualDownloadTrack(manualSearchTrackId!, r.username, r.filename, r.size, r.bit_rate),
     onSuccess: () => {
       toast('Download started', 'success');
+      cleanupSearch();
       setManualSearchTrackId(null);
+
       setManualResults([]);
+      setManualSearchComplete(false);
+      setManualFileCount(0);
       queryClient.invalidateQueries({ queryKey: ['album', id] });
       queryClient.invalidateQueries({ queryKey: ['downloads'] });
     },
@@ -378,18 +435,21 @@ export default function AlbumDetail() {
                   </div>
                   {isManualOpen && (
                     <div className="bg-zinc-900/50 border-b border-zinc-800/50 px-3 py-2 animate-fade-in">
-                      {manualSearching && (
+                      {manualSearching && manualResults.length === 0 && (
                         <div className="flex items-center gap-2 py-3 justify-center">
                           <div className="w-4 h-4 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
-                          <span className="text-xs text-zinc-500">Searching slskd...</span>
+                          <span className="text-xs text-zinc-500">Searching peers...</span>
                         </div>
                       )}
-                      {!manualSearching && manualResults.length === 0 && (
+                      {manualSearchComplete && manualResults.length === 0 && (
                         <p className="text-xs text-zinc-500 text-center py-3">No results found</p>
                       )}
-                      {!manualSearching && manualResults.length > 0 && (
+                      {manualResults.length > 0 && (
                         <div className="space-y-0.5 max-h-64 overflow-y-auto">
-                          <p className="text-[10px] text-zinc-500 mb-1">{manualResults.length} results</p>
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="text-[10px] text-zinc-500">{manualResults.length} results{manualFileCount > 0 ? ` (${manualFileCount} files scanned)` : ''}</p>
+                            {manualSearching && <div className="w-2.5 h-2.5 border border-zinc-600 border-t-zinc-400 rounded-full animate-spin" />}
+                          </div>
                           {manualResults.map((r, i) => (
                             <button
                               key={`${r.username}-${i}`}

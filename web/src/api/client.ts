@@ -1,4 +1,4 @@
-import type { Artist, Album, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchResult, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown } from '../types/index';
+import type { Artist, Album, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown } from '../types/index';
 
 const BASE = '/api';
 
@@ -46,8 +46,12 @@ export const api = {
 
   queueTrack: (id: number) =>
     request<void>(`/tracks/${id}/queue`, { method: 'POST' }),
-  manualSearchTrack: (id: number) =>
-    request<ManualSearchResult[]>(`/tracks/${id}/search`, { method: 'POST' }),
+  startManualSearch: (id: number) =>
+    request<ManualSearchStart>(`/tracks/${id}/search`, { method: 'POST' }),
+  pollManualSearch: (trackId: number, searchId: string) =>
+    request<ManualSearchResponse>(`/tracks/${trackId}/search/${searchId}`),
+  deleteManualSearch: (trackId: number, searchId: string) =>
+    request<void>(`/tracks/${trackId}/search/${searchId}`, { method: 'DELETE' }),
   manualDownloadTrack: (id: number, username: string, filename: string, size: number, bitRate: number) =>
     request<{ status: string }>(`/tracks/${id}/download`, {
       method: 'POST',
