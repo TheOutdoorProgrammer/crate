@@ -97,8 +97,8 @@ Frontend polls every 2s, shows results as they arrive with a spinner until `is_c
 All file selection goes through `scoreCandidates()` in `internal/services/downloader/service.go`. Score components:
 
 - **Quality (0-100)**: tier-based from user's priority list. Tier 0 = 100, Tier 1 = 75, Tier 2 = 50, etc. (min 25, gap of 25 per tier). If no tiers configured, uses fallback scoring. Fallback scores are capped below the lowest tier.
-- **Artist matching**: auto-downloads require the artist name in the file path. If no files mention the artist at all (flat library), falls back to title-only. If artist files exist but none pass filters, returns nothing rather than picking a wrong artist. See [ADR-0001](docs/adr/0001-artist-matching-fallback.md).
-- **Artist bonus (+20)**: within matched candidates, artist name in filename adds +20. Kept below the tier gap (25) so quality always dominates between tiers.
+- **Artist matching**: auto-downloads require both artist name and title in the file path — no fallback. Manual search only requires title (artist is a +20 bonus for ranking). See [ADR-0001](docs/adr/0001-artist-matching-fallback.md).
+- **Artist bonus (+20)**: in manual search results, artist name in filename adds +20. Kept below the tier gap (25) so quality always dominates between tiers.
 - **Free slot bonus (+10)**: if user has a free upload slot (instant start).
 - **Queue score (0-15)**: `15 / (1 + queueLength)`. Empty queue = 15, decays toward 0.
 
@@ -190,7 +190,7 @@ Design decisions with non-obvious trade-offs are documented as ADRs in `docs/adr
 
 | ADR | Area | Decision |
 |-----|------|----------|
-| [0001](docs/adr/0001-artist-matching-fallback.md) | Downloader | Require artist match in file selection; fall back to title-only only when no files mention the artist at all |
+| [0001](docs/adr/0001-artist-matching-fallback.md) | Downloader | Auto-downloads require artist+title; manual search requires title only |
 | [0002](docs/adr/0002-async-manual-search.md) | API/Frontend | Async manual search with frontend polling instead of blocking 30s request |
 
 When making a decision that involves a meaningful trade-off (especially "we tried X but chose Y because Z"), add a new ADR.

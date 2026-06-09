@@ -789,28 +789,8 @@ type scoringConfig struct {
 }
 
 func pickBestFile(results []slskd.SearchResult, track *models.Track, ac availabilityChecker, cfg scoringConfig) *candidate {
-	cfgStrict := cfg
-	cfgStrict.requireArtist = true
-	candidates := scoreCandidates(results, track, ac, cfgStrict)
-	if len(candidates) > 0 {
-		return &candidates[0]
-	}
-
-	// No artist-matching candidates passed filters. If any file in the results
-	// mentions the artist at all, the right source exists but didn't qualify
-	// (wrong format, locked, blacklisted, etc.) — don't fall back to wrong artists.
-	artistLower := strings.ToLower(track.ArtistName)
-	for _, r := range results {
-		for _, f := range r.Files {
-			if strings.Contains(strings.ToLower(f.Filename), artistLower) {
-				return nil
-			}
-		}
-	}
-
-	// Flat library: no files mention the artist anywhere in their path.
-	// Fall back to title-only matching (see ADR-0001).
-	candidates = scoreCandidates(results, track, ac, cfg)
+	cfg.requireArtist = true
+	candidates := scoreCandidates(results, track, ac, cfg)
 	if len(candidates) == 0 {
 		return nil
 	}

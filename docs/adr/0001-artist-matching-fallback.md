@@ -1,8 +1,8 @@
-# ADR-0001: Require Artist Match in Download File Selection
+# ADR-0001: Require Artist and Title Match in Auto-Downloads
 
 ## Status
 
-Accepted (2026-06-08)
+Accepted (2026-06-08), revised (2026-06-08)
 
 ## Context
 
@@ -18,18 +18,14 @@ The artist match was intentionally kept as a bonus rather than a hard filter to 
 
 ## Decision
 
-Require the artist name in the file path for auto-downloads, with a conditional fallback:
+**Auto-downloads** (`pickBestFile`) require both artist name and track title in the file path. No fallback. If no files match both, the download fails and the scheduler retries on the next cycle.
 
-1. **First pass**: `scoreCandidates` runs with `requireArtist: true` — files must contain both the artist name and track title in the path.
-2. **If no candidates pass**: scan all raw results to check whether *any* file mentions the artist name anywhere in its path.
-   - **Artist files exist but none qualified** (locked, blacklisted, wrong format, etc.): return no result. The correct source exists but isn't available right now — downloading from a wrong artist is worse than waiting.
-   - **No files mention the artist at all** (flat library): fall back to title-only matching. This preserves the original flat-library support.
+**Manual search** (`PollManualSearch`) only requires the track title. Users see all title-matching results and choose for themselves. Since manual search now supports editable queries (ADR-0002), users can refine the search if they need to.
 
-Manual search (`ManualSearch`) is unchanged — it still returns all title-matching results so users can make their own choice.
+The flat-library concern that originally motivated the bonus-only approach is no longer relevant for auto-downloads — downloading the wrong song is always worse than waiting. For manual search, the user is in control and can see what they're picking.
 
 ## Consequences
 
-- Auto-downloads will no longer grab wrong-artist files for common song titles.
-- Flat libraries remain supported via the fallback path, though they are only reached when no artist-matching files exist at all.
-- If a correct-artist file exists but is locked/blacklisted/filtered, the download will fail rather than grab a wrong-artist file. The scheduler will retry on its next cycle when the source may be available.
-- The artist bonus (+20) still exists within `scoreCandidates` for tie-breaking among title-only fallback results.
+- Auto-downloads will never grab wrong-artist files, even for flat libraries. If a user's only source is a flat library, the auto-download will fail and they can use manual search to find and download it.
+- Manual search is lenient — shows everything matching the title, scored with artist as a +20 bonus for ranking.
+- The scheduler retries failed downloads on its next cycle, so transient unavailability of artist-matching sources resolves naturally.

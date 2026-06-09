@@ -699,37 +699,8 @@ func TestPickBestFileRequiresArtistMatch(t *testing.T) {
 	}
 }
 
-func TestPickBestFileFallsBackForFlatLibrary(t *testing.T) {
+func TestPickBestFileRejectsWrongArtist(t *testing.T) {
 	results := []slskd.SearchResult{
-		{
-			Username:          "flat_library_user",
-			HasFreeUploadSlot: true,
-			Files: []slskd.SearchFile{
-				{Filename: "music/downloads/Dreams.flac", Size: 30000000},
-			},
-		},
-	}
-
-	track := &models.Track{Title: "Dreams", ArtistName: "Fleetwood Mac"}
-	best := pickBestFile(results, track, nil, defaultCfg)
-
-	if best == nil {
-		t.Fatal("expected fallback to title-only match for flat library")
-	}
-	if best.username != "flat_library_user" {
-		t.Errorf("expected flat_library_user, got %s", best.username)
-	}
-}
-
-func TestPickBestFileNoFallbackWhenArtistFilesExist(t *testing.T) {
-	results := []slskd.SearchResult{
-		{
-			Username:          "has_artist_but_locked",
-			HasFreeUploadSlot: true,
-			Files: []slskd.SearchFile{
-				{Filename: "music/Fleetwood Mac/Rumours/Dreams.flac", Size: 30000000, IsLocked: true},
-			},
-		},
 		{
 			Username:          "wrong_artist",
 			HasFreeUploadSlot: true,
@@ -743,7 +714,26 @@ func TestPickBestFileNoFallbackWhenArtistFilesExist(t *testing.T) {
 	best := pickBestFile(results, track, nil, defaultCfg)
 
 	if best != nil {
-		t.Errorf("expected nil (artist files exist but locked, should not fall back to wrong artist), got %s", best.username)
+		t.Errorf("expected nil (wrong artist should never match in auto-download), got %s", best.username)
+	}
+}
+
+func TestPickBestFileRejectsFlatLibrary(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username:          "flat_library_user",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/downloads/Dreams.flac", Size: 30000000},
+			},
+		},
+	}
+
+	track := &models.Track{Title: "Dreams", ArtistName: "Fleetwood Mac"}
+	best := pickBestFile(results, track, nil, defaultCfg)
+
+	if best != nil {
+		t.Errorf("expected nil (no artist in path, auto-download requires artist match), got %s", best.username)
 	}
 }
 
