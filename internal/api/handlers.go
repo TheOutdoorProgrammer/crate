@@ -849,6 +849,21 @@ func (s *Server) handleUnwatchTrack(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+
+	if r.URL.Query().Get("delete") == "true" {
+		track, err := s.queries.GetTrackWithMeta(id)
+		if err == nil && track.Status == models.TrackStatusOwned {
+			deleteTrackFile(s.libraryDir, track)
+			s.bgWork.Add(1)
+			go func() {
+				defer s.bgWork.Done()
+				for _, n := range s.downloader.Notifiers() {
+					n.TriggerScan(context.Background())
+				}
+			}()
+		}
+	}
+
 	if err := s.queries.DeleteTrack(id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete track")
 		return

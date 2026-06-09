@@ -848,6 +848,26 @@ func TestUnwatchTrack(t *testing.T) {
 	}
 }
 
+func TestUnwatchTrackWithDelete(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	// delete=true on a non-owned track should still unwatch without error
+	w := env.do("DELETE", fmt.Sprintf("/api/tracks/%d?delete=true", tracks[0].ID), "")
+	if w.Code != 204 {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+
+	remaining, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+	if len(remaining) != len(tracks)-1 {
+		t.Errorf("expected %d tracks remaining, got %d", len(tracks)-1, len(remaining))
+	}
+}
+
 func TestQueueTrackForDownload(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
