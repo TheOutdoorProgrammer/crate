@@ -62,7 +62,7 @@ For external providers: `CRATE_PROVIDERS=spotify:external:192.168.1.10:50053`
 2. User watches an artist (full discography), album, or individual track
 3. Watched items saved to SQLite with provider + provider_id
 4. Scheduler (configurable interval, default 6h) checks each watched artist's provider for new releases
-5. Downloader processes queue: search slskd → pick best file → download → organize → tag
+5. Downloader processes queue: search slskd → pick best file → download → organize → tag → write `crate:{track_id}` into file comment
 6. Track status: `wanted` → `downloading` → `owned`
 
 ## Download Retry, Blacklist & Shadow Bans
@@ -126,6 +126,16 @@ The `quality_fallback_enabled` setting (default true) controls whether files out
 - Auth uses token+salt scheme: `token = md5(password + random_salt)`, both sent as query params
 - Implemented as a `PostDownloadNotifier` interface — extensible for other integrations
 - Does nothing if settings are not configured (all three fields required)
+
+## Crate ID Comment Tag
+
+The tagger writes `crate:{track_id}` into each music file's comment metadata during the organize → tag pipeline. This embeds the Crate internal track ID in the file itself, enabling Subsonic clients (like Haystack) to bridge back to Crate by ID instead of fragile artist+title matching.
+
+- **MP3**: ID3v2 COMM frame (language: "eng", encoding: UTF-8)
+- **FLAC**: `COMMENT` vorbis comment field
+- **WAV**: `ICMT` field in LIST INFO chunk
+- When `CrateID` is 0 (should never happen for real tracks), no comment is written
+- The `TrackMeta.CrateID` field is populated from `track.ID` in the organizer
 
 ## Key concepts
 
