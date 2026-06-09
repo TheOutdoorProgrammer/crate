@@ -90,6 +90,7 @@ func (s *Service) Organize(track *models.Track) error {
 		DiscNumber:  track.DiscNumber,
 		Year:        year,
 		CoverURL:    coverURL,
+		CrateID:     track.ID,
 	}); err != nil {
 		slog.Warn("organizer: tagging failed", "dest", dest, "error", err)
 	}

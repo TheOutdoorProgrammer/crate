@@ -22,6 +22,7 @@ type TrackMeta struct {
 	DiscNumber  int
 	Year        int
 	CoverURL    string
+	CrateID     int64
 }
 
 func Tag(filePath string, meta TrackMeta) error {
@@ -57,6 +58,15 @@ func tagMP3(filePath string, meta TrackMeta) error {
 	}
 	if meta.DiscNumber > 0 {
 		tag.AddTextFrame(tag.CommonID("Part of a set"), id3v2.EncodingUTF8, fmt.Sprintf("%d", meta.DiscNumber))
+	}
+
+	if meta.CrateID > 0 {
+		tag.AddCommentFrame(id3v2.CommentFrame{
+			Encoding:    id3v2.EncodingUTF8,
+			Language:    "eng",
+			Description: "",
+			Text:        fmt.Sprintf("crate:%d", meta.CrateID),
+		})
 	}
 
 	if meta.CoverURL != "" {
@@ -96,6 +106,9 @@ func tagFLAC(filePath string, meta TrackMeta) error {
 	if meta.Year > 0 {
 		cmt.Add("DATE", fmt.Sprintf("%d", meta.Year))
 	}
+	if meta.CrateID > 0 {
+		cmt.Add("COMMENT", fmt.Sprintf("crate:%d", meta.CrateID))
+	}
 
 	cmtBlock := cmt.Marshal()
 	if cmtIdx >= 0 {
@@ -132,14 +145,18 @@ func tagWAV(filePath string, meta TrackMeta) error {
 	cleaned := stripListInfo(data)
 
 	// Build new LIST INFO chunk
-	info := buildListInfo(map[string]string{
+	fields := map[string]string{
 		"INAM": meta.Title,
 		"IART": meta.Artist,
 		"IPRD": meta.Album,
 		"ITRK": fmt.Sprintf("%d", meta.TrackNumber),
 		"IKEY": fmt.Sprintf("%d", meta.DiscNumber),
 		"ICRD": fmt.Sprintf("%d", meta.Year),
-	})
+	}
+	if meta.CrateID > 0 {
+		fields["ICMT"] = fmt.Sprintf("crate:%d", meta.CrateID)
+	}
+	info := buildListInfo(fields)
 
 	// Append LIST chunk after existing sub-chunks
 	result := make([]byte, 0, len(cleaned)+len(info))
@@ -182,7 +199,7 @@ func stripListInfo(data []byte) []byte {
 }
 
 func buildListInfo(fields map[string]string) []byte {
-	keys := []string{"INAM", "IART", "IPRD", "ITRK", "IKEY", "ICRD"}
+	keys := []string{"INAM", "IART", "IPRD", "ITRK", "IKEY", "ICRD", "ICMT"}
 	var payload []byte
 	payload = append(payload, []byte("INFO")...)
 	for _, key := range keys {

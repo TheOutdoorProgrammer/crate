@@ -2,10 +2,16 @@ package tagger
 
 import (
 	"bytes"
+	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	id3v2 "github.com/bogem/id3v2/v2"
+	flac "github.com/go-flac/go-flac"
+	"github.com/go-flac/flacvorbis"
 )
 
 func TestReadAllUnderLimit(t *testing.T) {
@@ -171,5 +177,415 @@ func TestStripListInfo(t *testing.T) {
 	}
 	if !bytes.Contains(stripped, []byte("WAVE")) {
 		t.Error("stripped data should still contain WAVE header")
+	}
+}
+
+// makeMinimalMP3 creates a minimal valid MP3 file that the id3v2 library can open.
+func makeMinimalMP3() []byte {
+	dir, _ := os.MkdirTemp("", "mp3test")
+	defer os.RemoveAll(dir)
+	p := filepath.Join(dir, "blank.mp3")
+	// Write a valid MPEG audio frame sync (0xFF 0xFB) followed by enough padding
+	// for a valid frame, then let id3v2 create a proper tag on top.
+	frame := make([]byte, 417) // Minimum MPEG1 Layer3 128kbps frame
+	frame[0] = 0xFF
+	frame[1] = 0xFB // MPEG1 Layer3
+	frame[2] = 0x90 // 128kbps, 44100Hz
+	frame[3] = 0x00
+	os.WriteFile(p, frame, 0644)
+
+	tag, _ := id3v2.Open(p, id3v2.Options{Parse: false})
+	tag.SetTitle("init")
+	tag.Save()
+	tag.Close()
+
+	data, _ := os.ReadFile(p)
+	return data
+}
+
+// makeMinimalFLAC creates a minimal valid FLAC file with a STREAMINFO block
+// and a dummy frame sync so the go-flac parser doesn't panic on empty stream data.
+func makeMinimalFLAC() []byte {
+	var buf bytes.Buffer
+	buf.WriteString("fLaC")
+
+	// STREAMINFO block header: last-metadata-block=1, type=0, length=34
+	buf.WriteByte(0x80) // last block flag + type 0 (STREAMINFO)
+	buf.Write([]byte{0x00, 0x00, 0x22}) // length = 34
+
+	// STREAMINFO data (34 bytes)
+	si := make([]byte, 34)
+	binary.BigEndian.PutUint16(si[0:2], 4096) // min block size
+	binary.BigEndian.PutUint16(si[2:4], 4096) // max block size
+	si[10] = 0xAC // sample rate high bits (44100)
+	si[11] = 0x44
+	si[12] = byte((44100&0xF)<<4) | byte(1<<1) | byte(15>>4) // rate low | channels-1 | bps-1 high
+	si[13] = byte(15&0xF) << 4
+	buf.Write(si)
+
+	// Dummy frame data starting with sync code (0xFFF8) so readFLACStream doesn't panic
+	buf.Write([]byte{0xFF, 0xF8, 0x00, 0x00})
+
+	return buf.Bytes()
+}
+
+func TestTagMP3_WritesComment(t *testing.T) {
+	dir := t.TempDir()
+	mp3Path := filepath.Join(dir, "test.mp3")
+	if err := os.WriteFile(mp3Path, makeMinimalMP3(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := TrackMeta{
+		Title:   "Test Song",
+		Artist:  "Test Artist",
+		Album:   "Test Album",
+		CrateID: 42,
+	}
+	if err := tagMP3(mp3Path, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	tag, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tag.Close()
+
+	frames := tag.GetFrames(tag.CommonID("Comments"))
+	if len(frames) == 0 {
+		t.Fatal("expected COMM frame, got none")
+	}
+	cf, ok := frames[0].(id3v2.CommentFrame)
+	if !ok {
+		t.Fatal("frame is not a CommentFrame")
+	}
+	if cf.Text != "crate:42" {
+		t.Errorf("COMM text = %q, want %q", cf.Text, "crate:42")
+	}
+	if cf.Language != "eng" {
+		t.Errorf("COMM language = %q, want %q", cf.Language, "eng")
+	}
+}
+
+func TestTagMP3_NoCrateID(t *testing.T) {
+	dir := t.TempDir()
+	mp3Path := filepath.Join(dir, "test.mp3")
+	if err := os.WriteFile(mp3Path, makeMinimalMP3(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := TrackMeta{Title: "Test Song", Artist: "Test Artist", Album: "Test Album"}
+	if err := tagMP3(mp3Path, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	tag, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tag.Close()
+
+	frames := tag.GetFrames(tag.CommonID("Comments"))
+	if len(frames) != 0 {
+		t.Errorf("expected no COMM frames when CrateID=0, got %d", len(frames))
+	}
+}
+
+func TestTagMP3_AllFields(t *testing.T) {
+	dir := t.TempDir()
+	mp3Path := filepath.Join(dir, "test.mp3")
+	if err := os.WriteFile(mp3Path, makeMinimalMP3(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := TrackMeta{
+		Title:       "Airbag",
+		Artist:      "Radiohead",
+		Album:       "OK Computer",
+		TrackNumber: 1,
+		DiscNumber:  1,
+		Year:        1997,
+		CrateID:     99,
+	}
+	if err := tagMP3(mp3Path, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	tag, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tag.Close()
+
+	if tag.Title() != "Airbag" {
+		t.Errorf("title = %q, want %q", tag.Title(), "Airbag")
+	}
+	if tag.Artist() != "Radiohead" {
+		t.Errorf("artist = %q, want %q", tag.Artist(), "Radiohead")
+	}
+	if tag.Album() != "OK Computer" {
+		t.Errorf("album = %q, want %q", tag.Album(), "OK Computer")
+	}
+	if tag.Year() != "1997" {
+		t.Errorf("year = %q, want %q", tag.Year(), "1997")
+	}
+
+	frames := tag.GetFrames(tag.CommonID("Comments"))
+	if len(frames) == 0 {
+		t.Fatal("expected COMM frame")
+	}
+	cf := frames[0].(id3v2.CommentFrame)
+	if cf.Text != "crate:99" {
+		t.Errorf("COMM text = %q, want %q", cf.Text, "crate:99")
+	}
+}
+
+func TestTagFLAC_WritesComment(t *testing.T) {
+	dir := t.TempDir()
+	flacPath := filepath.Join(dir, "test.flac")
+	if err := os.WriteFile(flacPath, makeMinimalFLAC(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := TrackMeta{
+		Title:   "Test Song",
+		Artist:  "Test Artist",
+		Album:   "Test Album",
+		CrateID: 42,
+	}
+	if err := tagFLAC(flacPath, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := flac.ParseFile(flacPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var found bool
+	for _, block := range f.Meta {
+		if block.Type == flac.VorbisComment {
+			cmt, err := flacvorbis.ParseFromMetaDataBlock(*block)
+			if err != nil {
+				t.Fatal(err)
+			}
+			comments, _ := cmt.Get("COMMENT")
+			for _, c := range comments {
+				if c == "crate:42" {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("expected COMMENT=crate:42 in FLAC vorbis comments")
+	}
+}
+
+func TestTagFLAC_NoCrateID(t *testing.T) {
+	dir := t.TempDir()
+	flacPath := filepath.Join(dir, "test.flac")
+	if err := os.WriteFile(flacPath, makeMinimalFLAC(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := TrackMeta{Title: "Test Song", Artist: "Test Artist", Album: "Test Album"}
+	if err := tagFLAC(flacPath, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := flac.ParseFile(flacPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, block := range f.Meta {
+		if block.Type == flac.VorbisComment {
+			cmt, err := flacvorbis.ParseFromMetaDataBlock(*block)
+			if err != nil {
+				t.Fatal(err)
+			}
+			comments, _ := cmt.Get("COMMENT")
+			if len(comments) > 0 {
+				t.Errorf("expected no COMMENT field when CrateID=0, got %v", comments)
+			}
+		}
+	}
+}
+
+func TestTagFLAC_AllFields(t *testing.T) {
+	dir := t.TempDir()
+	flacPath := filepath.Join(dir, "test.flac")
+	if err := os.WriteFile(flacPath, makeMinimalFLAC(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := TrackMeta{
+		Title:       "Airbag",
+		Artist:      "Radiohead",
+		Album:       "OK Computer",
+		TrackNumber: 1,
+		DiscNumber:  1,
+		Year:        1997,
+		CrateID:     99,
+	}
+	if err := tagFLAC(flacPath, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := flac.ParseFile(flacPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, block := range f.Meta {
+		if block.Type != flac.VorbisComment {
+			continue
+		}
+		cmt, err := flacvorbis.ParseFromMetaDataBlock(*block)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		check := func(field, want string) {
+			vals, _ := cmt.Get(field)
+			if len(vals) == 0 || vals[0] != want {
+				t.Errorf("%s = %v, want %q", field, vals, want)
+			}
+		}
+		check("TITLE", "Airbag")
+		check("ARTIST", "Radiohead")
+		check("ALBUM", "OK Computer")
+		check("TRACKNUMBER", "1")
+		check("DISCNUMBER", "1")
+		check("DATE", "1997")
+		check("COMMENT", "crate:99")
+	}
+}
+
+func TestTagWAV_WritesComment(t *testing.T) {
+	dir := t.TempDir()
+	wavPath := filepath.Join(dir, "test.wav")
+	if err := os.WriteFile(wavPath, makeMinimalWAV(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := TrackMeta{
+		Title:   "Test Song",
+		Artist:  "Test Artist",
+		Album:   "Test Album",
+		CrateID: 42,
+	}
+	if err := tagWAV(wavPath, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(wavPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Contains(data, []byte("ICMT")) {
+		t.Error("tagged WAV should contain ICMT chunk")
+	}
+	if !bytes.Contains(data, []byte("crate:42")) {
+		t.Error("tagged WAV should contain crate:42 in ICMT")
+	}
+}
+
+func TestTagWAV_NoCrateID(t *testing.T) {
+	dir := t.TempDir()
+	wavPath := filepath.Join(dir, "test.wav")
+	if err := os.WriteFile(wavPath, makeMinimalWAV(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := TrackMeta{Title: "Test Song", Artist: "Test Artist", Album: "Test Album", TrackNumber: 1, Year: 2020}
+	if err := tagWAV(wavPath, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(wavPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes.Contains(data, []byte("ICMT")) {
+		t.Error("expected no ICMT chunk when CrateID=0")
+	}
+}
+
+func TestTagWAV_CrateIDSurvivesRetag(t *testing.T) {
+	dir := t.TempDir()
+	wavPath := filepath.Join(dir, "test.wav")
+	if err := os.WriteFile(wavPath, makeMinimalWAV(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := TrackMeta{Title: "Song", Artist: "Artist", Album: "Album", TrackNumber: 1, Year: 2020, CrateID: 55}
+	if err := tagWAV(wavPath, meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := tagWAV(wavPath, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	data, _ := os.ReadFile(wavPath)
+	count := bytes.Count(data, []byte("crate:55"))
+	if count != 1 {
+		t.Errorf("expected exactly 1 occurrence of crate:55 after retag, got %d", count)
+	}
+}
+
+func TestTagDispatch(t *testing.T) {
+	dir := t.TempDir()
+	meta := TrackMeta{Title: "T", Artist: "A", Album: "Al", CrateID: 7}
+
+	// WAV via Tag()
+	wavPath := filepath.Join(dir, "test.wav")
+	os.WriteFile(wavPath, makeMinimalWAV(), 0644)
+	if err := Tag(wavPath, meta); err != nil {
+		t.Fatalf("Tag(.wav) failed: %v", err)
+	}
+	data, _ := os.ReadFile(wavPath)
+	if !bytes.Contains(data, []byte(fmt.Sprintf("crate:%d", meta.CrateID))) {
+		t.Error("Tag(.wav) should write crate ID")
+	}
+
+	// MP3 via Tag()
+	mp3Path := filepath.Join(dir, "test.mp3")
+	os.WriteFile(mp3Path, makeMinimalMP3(), 0644)
+	if err := Tag(mp3Path, meta); err != nil {
+		t.Fatalf("Tag(.mp3) failed: %v", err)
+	}
+	tag, _ := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
+	defer tag.Close()
+	frames := tag.GetFrames(tag.CommonID("Comments"))
+	if len(frames) == 0 {
+		t.Error("Tag(.mp3) should write COMM frame")
+	}
+
+	// FLAC via Tag()
+	flacPath := filepath.Join(dir, "test.flac")
+	os.WriteFile(flacPath, makeMinimalFLAC(), 0644)
+	if err := Tag(flacPath, meta); err != nil {
+		t.Fatalf("Tag(.flac) failed: %v", err)
+	}
+	f, _ := flac.ParseFile(flacPath)
+	var found bool
+	for _, block := range f.Meta {
+		if block.Type == flac.VorbisComment {
+			cmt, _ := flacvorbis.ParseFromMetaDataBlock(*block)
+			comments, _ := cmt.Get("COMMENT")
+			for _, c := range comments {
+				if c == "crate:7" {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("Tag(.flac) should write COMMENT vorbis field")
 	}
 }
