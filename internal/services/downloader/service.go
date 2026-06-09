@@ -521,18 +521,22 @@ type ManualSearchResult struct {
 }
 
 // ManualSearch runs a slskd search for a track and returns all scored results.
-// StartManualSearch kicks off an slskd search and returns the search ID immediately.
-func (s *Service) StartManualSearch(ctx context.Context, trackID int64) (string, error) {
+// StartManualSearch kicks off an slskd search and returns the search ID and query used.
+// If customQuery is non-empty, it is used instead of the default "artist title" query.
+func (s *Service) StartManualSearch(ctx context.Context, trackID int64, customQuery string) (string, string, error) {
 	track, err := s.queries.GetTrackWithMeta(trackID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	query := track.ArtistName + " " + track.Title
+	if customQuery != "" {
+		query = customQuery
+	}
 	search, err := s.slskd.StartSearch(ctx, query)
 	if err != nil {
-		return "", fmt.Errorf("start search: %w", err)
+		return "", "", fmt.Errorf("start search: %w", err)
 	}
-	return search.ID, nil
+	return search.ID, query, nil
 }
 
 // ManualSearchResponse holds scored results plus completion status.

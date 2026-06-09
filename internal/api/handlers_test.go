@@ -1232,6 +1232,13 @@ func TestManualSearchTrack(t *testing.T) {
 	if !ok || searchID == "" {
 		t.Fatal("expected search_id in response")
 	}
+	query, ok := startResp["query"].(string)
+	if !ok || query == "" {
+		t.Fatal("expected query in response")
+	}
+	if query != "Test Artist Track A1" {
+		t.Errorf("expected default query 'Test Artist Track A1', got %q", query)
+	}
 
 	// Poll for results
 	w = env.do("GET", fmt.Sprintf("/api/tracks/%d/search/%s", tracks[0].ID, searchID), "")
@@ -1265,6 +1272,59 @@ func TestManualSearchTrack(t *testing.T) {
 	if w.Code != 204 {
 		t.Fatalf("expected 204 on cleanup, got %d", w.Code)
 	}
+}
+
+func TestManualSearchTrackCustomQuery(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	w := env.do("POST", fmt.Sprintf("/api/tracks/%d/search", tracks[0].ID), `{"query":"custom search terms"}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	startResp := decode[map[string]any](t, w)
+	query := startResp["query"].(string)
+	if query != "custom search terms" {
+		t.Errorf("expected custom query, got %q", query)
+	}
+	searchID := startResp["search_id"].(string)
+	if searchID == "" {
+		t.Fatal("expected search_id")
+	}
+
+	// Cleanup
+	w = env.do("DELETE", fmt.Sprintf("/api/tracks/%d/search/%s", tracks[0].ID, searchID), "")
+	if w.Code != 204 {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+}
+
+func TestManualSearchTrackEmptyBodyUsesDefault(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	// Empty body — should use default "artist title" query
+	w := env.do("POST", fmt.Sprintf("/api/tracks/%d/search", tracks[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	startResp := decode[map[string]any](t, w)
+	query := startResp["query"].(string)
+	if query != "Test Artist Track A1" {
+		t.Errorf("expected default query, got %q", query)
+	}
+
+	// Cleanup
+	searchID := startResp["search_id"].(string)
+	env.do("DELETE", fmt.Sprintf("/api/tracks/%d/search/%s", tracks[0].ID, searchID), "")
 }
 
 func TestManualDownloadTrack(t *testing.T) {

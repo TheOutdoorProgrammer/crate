@@ -46,8 +46,11 @@ export const api = {
 
   queueTrack: (id: number) =>
     request<void>(`/tracks/${id}/queue`, { method: 'POST' }),
-  startManualSearch: (id: number) =>
-    request<ManualSearchStart>(`/tracks/${id}/search`, { method: 'POST' }),
+  startManualSearch: (id: number, query?: string) =>
+    request<ManualSearchStart>(`/tracks/${id}/search`, {
+      method: 'POST',
+      body: query ? JSON.stringify({ query }) : undefined,
+    }),
   pollManualSearch: (trackId: number, searchId: string) =>
     request<ManualSearchResponse>(`/tracks/${trackId}/search/${searchId}`),
   deleteManualSearch: (trackId: number, searchId: string) =>

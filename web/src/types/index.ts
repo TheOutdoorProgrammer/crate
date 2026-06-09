@@ -181,6 +181,7 @@ export interface ManualSearchResponse {
 export interface ManualSearchStart {
   search_id: string;
   track_id: number;
+  query: string;
 }
 
 export interface ProviderInfo {

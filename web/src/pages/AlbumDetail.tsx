@@ -104,6 +104,7 @@ export default function AlbumDetail() {
   const [manualSearching, setManualSearching] = useState(false);
   const [manualSearchComplete, setManualSearchComplete] = useState(false);
   const [manualFileCount, setManualFileCount] = useState(0);
+  const [manualQuery, setManualQuery] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeSearchRef = useRef<{ trackId: number; searchId: string } | null>(null);
 
@@ -120,24 +121,15 @@ export default function AlbumDetail() {
 
   useEffect(() => cleanupSearch, [cleanupSearch]);
 
-  const startManualSearch = async (trackId: number) => {
-    if (manualSearchTrackId === trackId) {
-      cleanupSearch();
-      setManualSearchTrackId(null);
-
-      setManualResults([]);
-      setManualSearchComplete(false);
-      setManualFileCount(0);
-      return;
-    }
+  const runSearch = useCallback(async (trackId: number, customQuery?: string) => {
     cleanupSearch();
-    setManualSearchTrackId(trackId);
     setManualResults([]);
     setManualSearching(true);
     setManualSearchComplete(false);
     setManualFileCount(0);
     try {
-      const { search_id } = await api.startManualSearch(trackId);
+      const { search_id, query } = await api.startManualSearch(trackId, customQuery);
+      setManualQuery(query);
       activeSearchRef.current = { trackId, searchId: search_id };
 
       let done = false;
@@ -173,6 +165,20 @@ export default function AlbumDetail() {
       toast(err instanceof Error ? err.message : 'Search failed', 'error');
       setManualSearching(false);
     }
+  }, [cleanupSearch, toast]);
+
+  const startManualSearch = async (trackId: number) => {
+    if (manualSearchTrackId === trackId) {
+      cleanupSearch();
+      setManualSearchTrackId(null);
+      setManualResults([]);
+      setManualSearchComplete(false);
+      setManualFileCount(0);
+      setManualQuery('');
+      return;
+    }
+    setManualSearchTrackId(trackId);
+    await runSearch(trackId);
   };
 
   const manualDownload = useMutation({
@@ -182,10 +188,10 @@ export default function AlbumDetail() {
       toast('Download started', 'success');
       cleanupSearch();
       setManualSearchTrackId(null);
-
       setManualResults([]);
       setManualSearchComplete(false);
       setManualFileCount(0);
+      setManualQuery('');
       queryClient.invalidateQueries({ queryKey: ['album', id] });
       queryClient.invalidateQueries({ queryKey: ['downloads'] });
     },
@@ -435,6 +441,32 @@ export default function AlbumDetail() {
                   </div>
                   {isManualOpen && (
                     <div className="bg-zinc-900/50 border-b border-zinc-800/50 px-3 py-2 animate-fade-in">
+                      {manualQuery && (
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (manualSearchTrackId && manualQuery.trim()) {
+                              runSearch(manualSearchTrackId, manualQuery.trim());
+                            }
+                          }}
+                          className="flex gap-1.5 mb-2"
+                        >
+                          <input
+                            type="text"
+                            value={manualQuery}
+                            onChange={(e) => setManualQuery(e.target.value)}
+                            className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500"
+                            disabled={manualSearching}
+                          />
+                          <button
+                            type="submit"
+                            disabled={manualSearching || !manualQuery.trim()}
+                            className="px-2 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 rounded text-xs text-zinc-300 transition-colors shrink-0"
+                          >
+                            Re-search
+                          </button>
+                        </form>
+                      )}
                       {manualSearching && manualResults.length === 0 && (
                         <div className="flex items-center gap-2 py-3 justify-center">
                           <div className="w-4 h-4 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />

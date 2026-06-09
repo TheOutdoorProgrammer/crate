@@ -771,12 +771,16 @@ func (s *Server) handleStartManualSearch(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	searchID, err := s.downloader.StartManualSearch(r.Context(), id)
+	var req struct {
+		Query string `json:"query"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	searchID, query, err := s.downloader.StartManualSearch(r.Context(), id, req.Query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "search failed: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"search_id": searchID, "track_id": id})
+	writeJSON(w, http.StatusOK, map[string]any{"search_id": searchID, "track_id": id, "query": query})
 }
 
 func (s *Server) handlePollManualSearch(w http.ResponseWriter, r *http.Request) {
