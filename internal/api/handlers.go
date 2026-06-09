@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -1107,7 +1110,123 @@ func (s *Server) handleClearCooldowns(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Reject
+
+func (s *Server) handleRejectTrack(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	track, err := s.queries.GetTrackWithMeta(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "track not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get track")
+		return
+	}
+
+	if track.Status != models.TrackStatusOwned {
+		writeError(w, http.StatusBadRequest, "track is not owned")
+		return
+	}
+
+	deleteTrackFile(s.libraryDir, track)
+
+	if track.DownloadedFrom != nil && track.DownloadedFilename != nil {
+		_ = s.queries.BlacklistFile(*track.DownloadedFrom, *track.DownloadedFilename, "rejected by user")
+		slog.Info("reject: blacklisted source", "username", *track.DownloadedFrom, "filename", *track.DownloadedFilename)
+	}
+
+	if err := s.queries.RejectTrack(id); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to reject track")
+		return
+	}
+
+	if err := s.queries.ReenqueueDownload(id); err != nil {
+		slog.Error("reject: failed to re-enqueue", "track_id", id, "error", err)
+	}
+
+	s.activityLog.Record("track_rejected", "track", id,
+		fmt.Sprintf("Rejected: %s - %s", track.ArtistName, track.Title))
+
+	s.bgWork.Add(1)
+	go func() {
+		defer s.bgWork.Done()
+		for _, n := range s.downloader.Notifiers() {
+			n.TriggerScan(context.Background())
+		}
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
+}
+
+func (s *Server) handleRejectTrackByName(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Artist string `json:"artist"`
+		Title  string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Artist == "" || req.Title == "" {
+		writeError(w, http.StatusBadRequest, "artist and title are required")
+		return
+	}
+
+	track, err := s.queries.FindOwnedTrackByName(req.Artist, req.Title)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no owned track found matching artist/title")
+		return
+	}
+
+	deleteTrackFile(s.libraryDir, track)
+
+	if track.DownloadedFrom != nil && track.DownloadedFilename != nil {
+		_ = s.queries.BlacklistFile(*track.DownloadedFrom, *track.DownloadedFilename, "rejected by user")
+	}
+
+	if err := s.queries.RejectTrack(track.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to reject track")
+		return
+	}
+
+	if err := s.queries.ReenqueueDownload(track.ID); err != nil {
+		slog.Error("reject: failed to re-enqueue", "track_id", track.ID, "error", err)
+	}
+
+	s.activityLog.Record("track_rejected", "track", track.ID,
+		fmt.Sprintf("Rejected: %s - %s", track.ArtistName, track.Title))
+
+	s.bgWork.Add(1)
+	go func() {
+		defer s.bgWork.Done()
+		for _, n := range s.downloader.Notifiers() {
+			n.TriggerScan(context.Background())
+		}
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
+}
+
 // Helpers
+
+func deleteTrackFile(libraryDir string, track *models.Track) {
+	if track.FilePath == nil || libraryDir == "" {
+		return
+	}
+	fullPath := filepath.Join(libraryDir, *track.FilePath)
+	cleaned := filepath.Clean(fullPath)
+	if !strings.HasPrefix(cleaned, filepath.Clean(libraryDir)+string(filepath.Separator)) {
+		slog.Error("reject: path escapes library dir", "path", cleaned)
+		return
+	}
+	if err := os.Remove(cleaned); err != nil && !os.IsNotExist(err) { // #nosec G703 -- path validated above
+		slog.Error("reject: failed to delete file", "path", cleaned, "error", err)
+	} else {
+		slog.Info("reject: deleted file", "path", cleaned)
+	}
+}
 
 func strPtrOrNil(s string) *string {
 	if s == "" {

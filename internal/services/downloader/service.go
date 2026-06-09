@@ -58,6 +58,10 @@ func (s *Service) AddNotifier(n PostDownloadNotifier) {
 	s.notifiers = append(s.notifiers, n)
 }
 
+func (s *Service) Notifiers() []PostDownloadNotifier {
+	return s.notifiers
+}
+
 func (s *Service) CancelTransfer(ctx context.Context, d *models.DownloadQueueItem) {
 	if d.SlskdSearchID == nil {
 		return
@@ -323,6 +327,7 @@ func (s *Service) checkSearch(ctx context.Context, d models.DownloadQueueItem) e
 		fmt.Sprintf("Downloading from %s: %s", best.username, filepath.Base(best.file.Filename)))
 
 	_ = s.queries.UpdateTrackDownloadedFrom(track.ID, best.username)
+	_ = s.queries.UpdateTrackDownloadedFilename(track.ID, best.file.Filename)
 
 	ext := strings.ToLower(filepath.Ext(best.file.Filename))
 	if format := strings.TrimPrefix(ext, "."); format != "" {
@@ -591,6 +596,7 @@ func (s *Service) ManualDownload(ctx context.Context, trackID int64, username, f
 	}
 
 	_ = s.queries.UpdateTrackDownloadedFrom(trackID, username)
+	_ = s.queries.UpdateTrackDownloadedFilename(trackID, filename)
 
 	ext := strings.ToLower(filepath.Ext(filename))
 	if format := strings.TrimPrefix(ext, "."); format != "" {

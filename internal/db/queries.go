@@ -254,10 +254,10 @@ func (q *Queries) FindTrackByProvider(provider, providerID string) (*models.Trac
 	t := &models.Track{}
 	err := q.db.QueryRow(
 		`SELECT id, album_id, title, track_number, disc_number, duration_ms, provider, provider_id,
-		        status, file_path, downloaded_from, download_format, download_bitrate, created_at, updated_at
+		        status, file_path, downloaded_from, downloaded_filename, download_format, download_bitrate, created_at, updated_at
 		 FROM tracks WHERE provider = ? AND provider_id = ?`, provider, providerID,
 	).Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
-		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom,
+		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
 		&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -268,7 +268,7 @@ func (q *Queries) FindTrackByProvider(provider, providerID string) (*models.Trac
 func (q *Queries) ListTracksByAlbum(albumID int64) ([]models.Track, error) {
 	rows, err := q.db.Query(
 		`SELECT id, album_id, title, track_number, disc_number, duration_ms, provider, provider_id,
-		        status, file_path, downloaded_from, download_format, download_bitrate, created_at, updated_at
+		        status, file_path, downloaded_from, downloaded_filename, download_format, download_bitrate, created_at, updated_at
 		 FROM tracks WHERE album_id = ? ORDER BY disc_number, track_number`, albumID,
 	)
 	if err != nil {
@@ -280,7 +280,7 @@ func (q *Queries) ListTracksByAlbum(albumID int64) ([]models.Track, error) {
 	for rows.Next() {
 		var t models.Track
 		if err := rows.Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
-			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom,
+			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
 			&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -311,11 +311,26 @@ func (q *Queries) UpdateTrackDownloadedFrom(id int64, username string) error {
 	return err
 }
 
+func (q *Queries) UpdateTrackDownloadedFilename(id int64, filename string) error {
+	_, err := q.db.Exec(`UPDATE tracks SET downloaded_filename = ?, updated_at = ? WHERE id = ?`,
+		filename, now(), id)
+	return err
+}
+
+func (q *Queries) RejectTrack(id int64) error {
+	_, err := q.db.Exec(
+		`UPDATE tracks SET status = 'wanted', file_path = NULL, downloaded_from = NULL,
+		        downloaded_filename = NULL, download_format = NULL, download_bitrate = NULL,
+		        updated_at = ? WHERE id = ?`,
+		now(), id)
+	return err
+}
+
 func (q *Queries) GetTrackWithMeta(id int64) (*models.Track, error) {
 	t := &models.Track{}
 	err := q.db.QueryRow(
 		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
-		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from,
+		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 		        t.download_format, t.download_bitrate, t.created_at, t.updated_at,
 		        al.title, ar.name
 		 FROM tracks t
@@ -323,7 +338,7 @@ func (q *Queries) GetTrackWithMeta(id int64) (*models.Track, error) {
 		 JOIN artists ar ON ar.id = al.artist_id
 		 WHERE t.id = ?`, id,
 	).Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
-		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom,
+		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
 		&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt,
 		&t.AlbumTitle, &t.ArtistName)
 	if err != nil {
@@ -338,7 +353,7 @@ func (q *Queries) ListWantedTracks() ([]models.Track, error) {
 
 func (q *Queries) ListWantedTracksLimited(limit int) ([]models.Track, error) {
 	query := `SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
-	                 t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from,
+	                 t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 	                 t.download_format, t.download_bitrate, t.created_at, t.updated_at,
 	                 al.title, ar.name
 	          FROM tracks t
@@ -361,7 +376,7 @@ func (q *Queries) ListWantedTracksLimited(limit int) ([]models.Track, error) {
 
 func (q *Queries) ListWantedTracksWithCooldown(cooldownCutoff string, limit int) ([]models.Track, error) {
 	query := `SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
-	                 t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from,
+	                 t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 	                 t.download_format, t.download_bitrate, t.created_at, t.updated_at,
 	                 al.title, ar.name
 	          FROM tracks t
@@ -392,7 +407,7 @@ func scanTracks(rows *sql.Rows) ([]models.Track, error) {
 	for rows.Next() {
 		var t models.Track
 		if err := rows.Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
-			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom,
+			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
 			&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt,
 			&t.AlbumTitle, &t.ArtistName); err != nil {
 			return nil, err
@@ -405,7 +420,7 @@ func scanTracks(rows *sql.Rows) ([]models.Track, error) {
 func (q *Queries) ListWantedTracksByArtist(artistID int64) ([]models.Track, error) {
 	rows, err := q.db.Query(
 		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
-		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from,
+		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 		        t.download_format, t.download_bitrate, t.created_at, t.updated_at,
 		        al.title, ar.name
 		 FROM tracks t
@@ -423,7 +438,7 @@ func (q *Queries) ListWantedTracksByArtist(artistID int64) ([]models.Track, erro
 	for rows.Next() {
 		var t models.Track
 		if err := rows.Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
-			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom,
+			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
 			&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt,
 			&t.AlbumTitle, &t.ArtistName); err != nil {
 			return nil, err
@@ -436,7 +451,7 @@ func (q *Queries) ListWantedTracksByArtist(artistID int64) ([]models.Track, erro
 func (q *Queries) ListWantedTracksByAlbum(albumID int64) ([]models.Track, error) {
 	rows, err := q.db.Query(
 		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
-		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from,
+		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 		        t.download_format, t.download_bitrate, t.created_at, t.updated_at,
 		        al.title, ar.name
 		 FROM tracks t
@@ -454,7 +469,7 @@ func (q *Queries) ListWantedTracksByAlbum(albumID int64) ([]models.Track, error)
 	for rows.Next() {
 		var t models.Track
 		if err := rows.Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
-			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom,
+			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
 			&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt,
 			&t.AlbumTitle, &t.ArtistName); err != nil {
 			return nil, err
@@ -467,7 +482,7 @@ func (q *Queries) ListWantedTracksByAlbum(albumID int64) ([]models.Track, error)
 func (q *Queries) ListOwnedTracksWithPaths() ([]models.Track, error) {
 	rows, err := q.db.Query(
 		`SELECT id, album_id, title, track_number, disc_number, duration_ms,
-		        provider, provider_id, status, file_path, downloaded_from,
+		        provider, provider_id, status, file_path, downloaded_from, downloaded_filename,
 		        download_format, download_bitrate, created_at, updated_at
 		 FROM tracks WHERE status = 'owned' AND file_path IS NOT NULL`,
 	)
@@ -480,7 +495,7 @@ func (q *Queries) ListOwnedTracksWithPaths() ([]models.Track, error) {
 	for rows.Next() {
 		var t models.Track
 		if err := rows.Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
-			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom,
+			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
 			&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -498,7 +513,7 @@ func (q *Queries) UpdateTrackQuality(id int64, format string, bitrate int) error
 func (q *Queries) ListOwnedTracksByArtist(artistID int64) ([]models.Track, error) {
 	rows, err := q.db.Query(
 		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
-		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from,
+		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
 		        t.download_format, t.download_bitrate, t.created_at, t.updated_at,
 		        al.title, ar.name
 		 FROM tracks t
@@ -516,7 +531,7 @@ func (q *Queries) ListOwnedTracksByArtist(artistID int64) ([]models.Track, error
 	for rows.Next() {
 		var t models.Track
 		if err := rows.Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
-			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom,
+			&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
 			&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt,
 			&t.AlbumTitle, &t.ArtistName); err != nil {
 			return nil, err
@@ -878,6 +893,28 @@ type LibrarySearchResult struct {
 	AlbumTitle string `json:"album_title"`
 	TrackID    int64  `json:"track_id"`
 	TrackTitle string `json:"track_title"`
+}
+
+func (q *Queries) FindOwnedTrackByName(artist, title string) (*models.Track, error) {
+	t := &models.Track{}
+	err := q.db.QueryRow(
+		`SELECT t.id, t.album_id, t.title, t.track_number, t.disc_number, t.duration_ms,
+		        t.provider, t.provider_id, t.status, t.file_path, t.downloaded_from, t.downloaded_filename,
+		        t.download_format, t.download_bitrate, t.created_at, t.updated_at,
+		        al.title, ar.name
+		 FROM tracks t
+		 JOIN albums al ON al.id = t.album_id
+		 JOIN artists ar ON ar.id = al.artist_id
+		 WHERE ar.name = ? COLLATE NOCASE AND t.title = ? COLLATE NOCASE AND t.status = 'owned'
+		 LIMIT 1`, artist, title,
+	).Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
+		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
+		&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt,
+		&t.AlbumTitle, &t.ArtistName)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 func (q *Queries) SearchLibrary(query string, limit int) ([]LibrarySearchResult, error) {

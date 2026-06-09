@@ -107,10 +107,12 @@ func (s *Server) setupRouter() chi.Router {
 		})
 
 		r.Route("/tracks", func(r chi.Router) {
+			r.Post("/reject", s.handleRejectTrackByName)
 			r.Delete("/{id}", s.handleUnwatchTrack)
 			r.Post("/{id}/queue", s.handleQueueTrack)
 			r.Post("/{id}/search", s.handleManualSearch)
 			r.Post("/{id}/download", s.handleManualDownload)
+			r.Post("/{id}/reject", s.handleRejectTrack)
 			r.Put("/{id}/ignore", s.handleIgnoreTrack)
 			r.Delete("/{id}/ignore", s.handleUnignoreTrack)
 		})

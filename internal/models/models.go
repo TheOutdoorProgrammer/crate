@@ -80,9 +80,10 @@ type Track struct {
 	ProviderID      string      `json:"provider_id" db:"provider_id"`
 	Status          TrackStatus `json:"status" db:"status"`
 	FilePath        *string     `json:"file_path,omitempty" db:"file_path"`
-	DownloadedFrom  *string     `json:"downloaded_from,omitempty" db:"downloaded_from"`
-	DownloadFormat  *string     `json:"download_format,omitempty" db:"download_format"`
-	DownloadBitrate *int        `json:"download_bitrate,omitempty" db:"download_bitrate"`
+	DownloadedFrom     *string     `json:"downloaded_from,omitempty" db:"downloaded_from"`
+	DownloadedFilename *string     `json:"downloaded_filename,omitempty" db:"downloaded_filename"`
+	DownloadFormat     *string     `json:"download_format,omitempty" db:"download_format"`
+	DownloadBitrate    *int        `json:"download_bitrate,omitempty" db:"download_bitrate"`
 	CreatedAt       string      `json:"created_at" db:"created_at"`
 	UpdatedAt       string      `json:"updated_at" db:"updated_at"`
 	AlbumTitle      string      `json:"album_title,omitempty"`

@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1973,5 +1975,257 @@ func TestDeleteCooldownBadID(t *testing.T) {
 	w := env.do("DELETE", "/api/cooldowns/abc", "")
 	if w.Code != 400 {
 		t.Errorf("expected 400 for invalid id, got %d", w.Code)
+	}
+}
+
+// --- Reject Track ---
+
+func newTestEnvWithLibrary(t *testing.T, libraryDir string) *testEnv {
+	t.Helper()
+
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	c, err := cache.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+
+	actLog, err := activity.NewLog(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { actLog.Close() })
+
+	grpcAddr := startFakeProvider(t)
+
+	fakeSlskd := newFakeSlskd()
+	t.Cleanup(fakeSlskd.Close)
+
+	queries := db.NewQueries(database)
+	providerMgr := provider.NewManager(c, queries)
+
+	if err := providerMgr.RegisterProvider(context.Background(), "test", grpcAddr); err != nil {
+		t.Fatalf("register provider: %v", err)
+	}
+
+	queries.SetSetting("provider_primary", "test")
+
+	slskdClient := slskd.NewClient(fakeSlskd.URL, "test-key")
+	org := &noopOrganizer{}
+	dl := downloader.NewService(queries, slskdClient, org, actLog)
+
+	srv := api.NewServer(queries, providerMgr, c, dl, actLog, nil, libraryDir, "test")
+
+	return &testEnv{
+		server:      srv,
+		queries:     queries,
+		activityLog: actLog,
+		fakeSlskd:   fakeSlskd,
+	}
+}
+
+func TestRejectTrackSuccess(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	env.queries.UpdateTrackFilePath(tracks[0].ID, "Test Artist/Album One/01 Track One.flac")
+	env.queries.UpdateTrackDownloadedFrom(tracks[0].ID, "someuser")
+	env.queries.UpdateTrackDownloadedFilename(tracks[0].ID, `@@someuser\Music\Test Artist\01 Track One.flac`)
+
+	w := env.do("POST", fmt.Sprintf("/api/tracks/%d/reject", tracks[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	result := decode[map[string]string](t, w)
+	if result["status"] != "rejected" {
+		t.Errorf("expected status rejected, got %s", result["status"])
+	}
+
+	track, _ := env.queries.GetTrackWithMeta(tracks[0].ID)
+	if track.Status != models.TrackStatusWanted {
+		t.Errorf("expected track status wanted, got %s", track.Status)
+	}
+	if track.FilePath != nil {
+		t.Errorf("expected file_path nil, got %v", track.FilePath)
+	}
+	if track.DownloadedFrom != nil {
+		t.Errorf("expected downloaded_from nil, got %v", track.DownloadedFrom)
+	}
+	if track.DownloadedFilename != nil {
+		t.Errorf("expected downloaded_filename nil, got %v", track.DownloadedFilename)
+	}
+	if track.DownloadFormat != nil {
+		t.Errorf("expected download_format nil, got %v", track.DownloadFormat)
+	}
+}
+
+func TestRejectTrackBlacklists(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	env.queries.UpdateTrackFilePath(tracks[0].ID, "Test Artist/Album One/01 Track One.flac")
+	env.queries.UpdateTrackDownloadedFrom(tracks[0].ID, "baduser")
+	env.queries.UpdateTrackDownloadedFilename(tracks[0].ID, `@@baduser\Music\Track One.flac`)
+
+	env.do("POST", fmt.Sprintf("/api/tracks/%d/reject", tracks[0].ID), "")
+
+	if !env.queries.IsBlacklisted("baduser", `@@baduser\Music\Track One.flac`) {
+		t.Error("expected source to be blacklisted after reject")
+	}
+}
+
+func TestRejectTrackNoBlacklistWithoutFilename(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	env.queries.UpdateTrackFilePath(tracks[0].ID, "Test Artist/Album One/01 Track One.flac")
+	env.queries.UpdateTrackDownloadedFrom(tracks[0].ID, "someuser")
+
+	w := env.do("POST", fmt.Sprintf("/api/tracks/%d/reject", tracks[0].ID), "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	blacklist, _ := env.queries.ListBlacklist()
+	if len(blacklist) != 0 {
+		t.Errorf("expected no blacklist entries when downloaded_filename is nil, got %d", len(blacklist))
+	}
+}
+
+func TestRejectTrackReenqueues(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	env.queries.UpdateTrackFilePath(tracks[0].ID, "Test Artist/Album One/01 Track One.flac")
+
+	env.do("POST", fmt.Sprintf("/api/tracks/%d/reject", tracks[0].ID), "")
+
+	downloads, _ := env.queries.ListDownloads("pending")
+	found := false
+	for _, d := range downloads {
+		if d.TrackID == tracks[0].ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected rejected track to be re-enqueued for download")
+	}
+}
+
+func TestRejectTrackNotOwned(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	w := env.do("POST", fmt.Sprintf("/api/tracks/%d/reject", tracks[0].ID), "")
+	if w.Code != 400 {
+		t.Errorf("expected 400 for non-owned track, got %d", w.Code)
+	}
+}
+
+func TestRejectTrackNotFound(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("POST", "/api/tracks/99999/reject", "")
+	if w.Code != 404 {
+		t.Errorf("expected 404 for unknown track, got %d", w.Code)
+	}
+}
+
+func TestRejectTrackBadID(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("POST", "/api/tracks/abc/reject", "")
+	if w.Code != 400 {
+		t.Errorf("expected 400 for invalid id, got %d", w.Code)
+	}
+}
+
+func TestRejectTrackByName(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	env.queries.UpdateTrackFilePath(tracks[0].ID, "Test Artist/Album One/01 Track A1.flac")
+	env.queries.UpdateTrackDownloadedFrom(tracks[0].ID, "someuser")
+	env.queries.UpdateTrackDownloadedFilename(tracks[0].ID, `@@someuser\Music\Track A1.flac`)
+
+	w := env.do("POST", "/api/tracks/reject", `{"artist":"Test Artist","title":"Track A1"}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	track, _ := env.queries.GetTrackWithMeta(tracks[0].ID)
+	if track.Status != models.TrackStatusWanted {
+		t.Errorf("expected track status wanted, got %s", track.Status)
+	}
+
+	if !env.queries.IsBlacklisted("someuser", `@@someuser\Music\Track A1.flac`) {
+		t.Error("expected source blacklisted")
+	}
+}
+
+func TestRejectTrackByNameNotFound(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("POST", "/api/tracks/reject", `{"artist":"Nobody","title":"Nothing"}`)
+	if w.Code != 404 {
+		t.Errorf("expected 404 for unknown track, got %d", w.Code)
+	}
+}
+
+func TestRejectTrackByNameMissingFields(t *testing.T) {
+	env := newTestEnv(t)
+	w := env.do("POST", "/api/tracks/reject", `{"artist":""}`)
+	if w.Code != 400 {
+		t.Errorf("expected 400 for missing fields, got %d", w.Code)
+	}
+}
+
+func TestRejectTrackDeletesFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	env := newTestEnvWithLibrary(t, tmpDir)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	relPath := "Test Artist/Album One/01 Track One.flac"
+	fullPath := filepath.Join(tmpDir, relPath)
+	os.MkdirAll(filepath.Dir(fullPath), 0o755)
+	os.WriteFile(fullPath, []byte("fake audio"), 0o644)
+
+	env.queries.UpdateTrackFilePath(tracks[0].ID, relPath)
+
+	env.do("POST", fmt.Sprintf("/api/tracks/%d/reject", tracks[0].ID), "")
+
+	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
+		t.Error("expected file to be deleted after reject")
 	}
 }
