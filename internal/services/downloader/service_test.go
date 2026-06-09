@@ -669,6 +669,84 @@ func TestScoreCandidatesReturnsNegativeKeywordsWhenNotExcluding(t *testing.T) {
 	}
 }
 
+func TestPickBestFileRequiresArtistMatch(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username:          "wrong_artist_user",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/WrongArtist/Dreams.flac", Size: 30000000},
+			},
+		},
+		{
+			Username:          "correct_artist_user",
+			HasFreeUploadSlot: false,
+			QueueLength:       5,
+			Files: []slskd.SearchFile{
+				{Filename: "music/Fleetwood Mac/Rumours/Dreams.mp3", Size: 8000000, BitRate: 320},
+			},
+		},
+	}
+
+	track := &models.Track{Title: "Dreams", ArtistName: "Fleetwood Mac"}
+	best := pickBestFile(results, track, nil, defaultCfg)
+
+	if best == nil {
+		t.Fatal("expected a result")
+	}
+	if best.username != "correct_artist_user" {
+		t.Errorf("expected correct_artist_user, got %s", best.username)
+	}
+}
+
+func TestPickBestFileFallsBackForFlatLibrary(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username:          "flat_library_user",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/downloads/Dreams.flac", Size: 30000000},
+			},
+		},
+	}
+
+	track := &models.Track{Title: "Dreams", ArtistName: "Fleetwood Mac"}
+	best := pickBestFile(results, track, nil, defaultCfg)
+
+	if best == nil {
+		t.Fatal("expected fallback to title-only match for flat library")
+	}
+	if best.username != "flat_library_user" {
+		t.Errorf("expected flat_library_user, got %s", best.username)
+	}
+}
+
+func TestPickBestFileNoFallbackWhenArtistFilesExist(t *testing.T) {
+	results := []slskd.SearchResult{
+		{
+			Username:          "has_artist_but_locked",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/Fleetwood Mac/Rumours/Dreams.flac", Size: 30000000, IsLocked: true},
+			},
+		},
+		{
+			Username:          "wrong_artist",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/SomeoneElse/Dreams.flac", Size: 30000000},
+			},
+		},
+	}
+
+	track := &models.Track{Title: "Dreams", ArtistName: "Fleetwood Mac"}
+	best := pickBestFile(results, track, nil, defaultCfg)
+
+	if best != nil {
+		t.Errorf("expected nil (artist files exist but locked, should not fall back to wrong artist), got %s", best.username)
+	}
+}
+
 func TestInferExt(t *testing.T) {
 	tests := []struct {
 		name string

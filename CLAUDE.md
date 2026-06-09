@@ -28,6 +28,7 @@ internal/
     tagger/                     ID3/FLAC metadata tagging + cover art embedding
     navidrome/                  Optional Navidrome integration (triggers library scan after download)
 web/                            React frontend (Vite, Tailwind, React Query, React Router)
+docs/adr/                       Architecture Decision Records
 ```
 
 ## Provider Architecture
@@ -73,6 +74,7 @@ For external providers: `CRATE_PROVIDERS=spotify:external:192.168.1.10:50053`
 - **Retry backoff**: 5m → 15m → 30m → 1h. After 4 attempts (~2h cumulative), permanently fails. Track reverts to "wanted".
 - **Blacklist is per-file-per-user**: a user can be blacklisted for one file but not others. Shadow bans are per-user (all files blocked during cooldown).
 - **API management**: `GET/DELETE /api/blacklist/{id}`, `GET/DELETE /api/cooldowns/{id}` for viewing and removing entries. Also exposed in the Settings UI under "Blocked Sources".
+- **Track rejection**: `POST /api/tracks/{id}/reject` (by Crate track ID) or `POST /api/tracks/reject` with `{"artist":"...","title":"..."}` (by name). Deletes the file from the library, blacklists the source if `downloaded_from` and `downloaded_filename` are both known, resets track to wanted, re-enqueues for download, and triggers a Navidrome library scan. Tracks downloaded before v1.11.0 won't have `downloaded_filename` — reject still works but skips the blacklist step.
 
 ## Pagination
 
@@ -85,7 +87,8 @@ For external providers: `CRATE_PROVIDERS=spotify:external:192.168.1.10:50053`
 All file selection goes through `scoreCandidates()` in `internal/services/downloader/service.go`. Score components:
 
 - **Quality (0-100)**: tier-based from user's priority list. Tier 0 = 100, Tier 1 = 75, Tier 2 = 50, etc. (min 25, gap of 25 per tier). If no tiers configured, uses fallback scoring. Fallback scores are capped below the lowest tier.
-- **Artist bonus (+20)**: if artist name appears in filename. Kept below the tier gap (25) so quality always dominates between tiers.
+- **Artist matching**: auto-downloads require the artist name in the file path. If no files mention the artist at all (flat library), falls back to title-only. If artist files exist but none pass filters, returns nothing rather than picking a wrong artist. See [ADR-0001](docs/adr/0001-artist-matching-fallback.md).
+- **Artist bonus (+20)**: within matched candidates, artist name in filename adds +20. Kept below the tier gap (25) so quality always dominates between tiers.
 - **Free slot bonus (+10)**: if user has a free upload slot (instant start).
 - **Queue score (0-15)**: `15 / (1 + queueLength)`. Empty queue = 15, decays toward 0.
 
@@ -151,7 +154,7 @@ Docker: multi-stage build, builds all three binaries. Alpine runtime. CI: GitHub
 ## Testing
 
 Tests live in:
-- `internal/api/handlers_test.go` — API integration tests (50+ tests, includes blacklist/cooldown CRUD)
+- `internal/api/handlers_test.go` — API integration tests (100+ tests, includes blacklist/cooldown CRUD, track reject by ID and by name)
 - `internal/activity/activity_test.go` — Activity log unit tests
 - `internal/services/downloader/service_test.go` — Scoring system (tier-based, queue, cooldown filtering, balance invariants), retry delay, pickBestFile, blacklist, stale timeouts, inferExt
 - `internal/services/navidrome/client_test.go` — Navidrome scan trigger and auth tests
@@ -170,6 +173,16 @@ When adding or changing user-facing features (new settings, API endpoints, scori
 3. `site/index.html` and `site/docs.html` — marketing site and documentation
 
 The marketing docs at `site/docs.html` include a settings table, API reference, scoring system section, and download flow description that must stay in sync with the code.
+
+## Architecture Decision Records
+
+Design decisions with non-obvious trade-offs are documented as ADRs in `docs/adr/`. Read these before changing the relevant system — they explain *why* something works the way it does and what alternatives were considered.
+
+| ADR | Area | Decision |
+|-----|------|----------|
+| [0001](docs/adr/0001-artist-matching-fallback.md) | Downloader | Require artist match in file selection; fall back to title-only only when no files mention the artist at all |
+
+When making a decision that involves a meaningful trade-off (especially "we tried X but chose Y because Z"), add a new ADR.
 
 ## Lessons learned
 

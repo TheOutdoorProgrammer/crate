@@ -172,3 +172,11 @@ Crate does not include built-in authentication. If you need to restrict access, 
 | M4A    | Yes      | No | No |
 
 All formats are downloaded, organized into the library folder, and tracked in the database. Formats without tagging support are still fully functional -- they just won't have embedded metadata written by Crate.
+
+## Architecture Decision Records
+
+Design decisions with meaningful trade-offs are documented as ADRs in [`docs/adr/`](docs/adr/).
+
+| ADR | Decision |
+|-----|----------|
+| [0001](docs/adr/0001-artist-matching-fallback.md) | Require artist match in download file selection, fall back to title-only for flat libraries |
