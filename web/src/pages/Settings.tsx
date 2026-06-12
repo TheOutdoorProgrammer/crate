@@ -52,6 +52,7 @@ export default function Settings() {
   const [tiers, setTiers] = useState<QualityTier[]>([]);
   const [negativeKeywords, setNegativeKeywords] = useState<string[]>([]);
   const [newKeyword, setNewKeyword] = useState('');
+  const [namingPreview, setNamingPreview] = useState<{ path?: string; error?: string }>({});
 
   const { data: settings } = useQuery({
     queryKey: ['settings'],
@@ -85,6 +86,16 @@ export default function Settings() {
     }
   }, [settings]);
 
+  // Debounced live preview of the naming template (empty = server default).
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      api.namingPreview(form.naming_template ?? '')
+        .then((res) => setNamingPreview({ path: res.path }))
+        .catch((err: Error) => setNamingPreview({ error: err.message }));
+    }, 350);
+    return () => clearTimeout(handle);
+  }, [form.naming_template]);
+
   const save = useMutation({
     mutationFn: () => api.updateSettings({
       ...form,
@@ -97,6 +108,7 @@ export default function Settings() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     },
+    onError: (err: Error) => toast(err.message, 'error'),
   });
 
   const moveTier = useCallback((index: number, direction: -1 | 1) => {
@@ -166,6 +178,26 @@ export default function Settings() {
           </div>
         </SettingsSection>
       )}
+
+      <SettingsSection title="Library">
+        <label className="block text-xs text-zinc-400 mb-1">Naming Template</label>
+        <input
+          type="text"
+          value={form.naming_template || ''}
+          onChange={(e) => setForm({ ...form, naming_template: e.target.value })}
+          placeholder="{artist}/{album} ({year})/{track:2} - {title}"
+          spellCheck={false}
+          className="w-full bg-zinc-800 rounded-lg px-3 py-2.5 text-sm font-mono placeholder-zinc-600 outline-none focus:ring-2 focus:ring-zinc-600"
+        />
+        <p className="text-[11px] text-zinc-600 mt-1">
+          Folder and file layout for new downloads. Tokens: {'{artist}'}, {'{albumartist}'}, {'{album}'}, {'{year}'}, {'{track}'}, {'{disc}'}, {'{title}'}.
+          Zero-pad numbers with a width, e.g. {'{track:2}'}. The file extension is added automatically.
+          Leave blank for the default. Existing files are not renamed.
+        </p>
+        <div className={`mt-2 rounded-lg px-3 py-2 text-[11px] font-mono break-all ${namingPreview.error ? 'bg-red-950/40 text-red-400' : 'bg-zinc-800/50 text-zinc-400'}`}>
+          {namingPreview.error ?? namingPreview.path ?? '…'}
+        </div>
+      </SettingsSection>
 
       {settingsSections.map((section) => (
         <SettingsSection key={section.title} title={section.title}>

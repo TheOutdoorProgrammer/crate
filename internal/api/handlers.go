@@ -18,6 +18,7 @@ import (
 
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
+	"github.com/TheOutdoorProgrammer/crate/internal/naming"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
 	pb "github.com/TheOutdoorProgrammer/crate/proto/provider"
 )
@@ -1085,6 +1086,14 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// Validate everything before saving anything, so a bad value can't leave
+	// the settings half-applied.
+	if v, ok := settings[naming.SettingKey]; ok && strings.TrimSpace(v) != "" {
+		if err := naming.Validate(v); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid naming template: "+err.Error())
+			return
+		}
+	}
 	for k, v := range settings {
 		if hiddenSettings[k] {
 			continue
@@ -1098,6 +1107,30 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, settings)
+}
+
+// namingPreviewMeta is the sample metadata rendered by the settings UI's
+// live template preview.
+var namingPreviewMeta = naming.Meta{
+	Artist: "Radiohead",
+	Album:  "OK Computer",
+	Year:   1997,
+	Track:  6,
+	Disc:   1,
+	Title:  "Karma Police",
+}
+
+func (s *Server) handleNamingPreview(w http.ResponseWriter, r *http.Request) {
+	tmpl := r.URL.Query().Get("template")
+	if strings.TrimSpace(tmpl) == "" {
+		tmpl = naming.DefaultTemplate
+	}
+	path, err := naming.Render(tmpl, namingPreviewMeta)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"path": path + ".flac"})
 }
 
 // Blacklist & Cooldowns

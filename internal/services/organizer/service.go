@@ -6,11 +6,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
+	"github.com/TheOutdoorProgrammer/crate/internal/naming"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/tagger"
 )
 
@@ -45,24 +45,45 @@ func (s *Service) Organize(track *models.Track) error {
 		return err
 	}
 
-	albumDir := fmt.Sprintf("%s (%d)", album.Title, func() int {
-		if album.Year != nil {
-			return *album.Year
-		}
-		return 0
-	}())
-	if album.Year == nil {
-		albumDir = album.Title
+	year := 0
+	if album.Year != nil {
+		year = *album.Year
+	}
+	meta := naming.Meta{
+		Artist: artist.Name,
+		Album:  album.Title,
+		Year:   year,
+		Track:  track.TrackNumber,
+		Disc:   track.DiscNumber,
+		Title:  track.Title,
 	}
 
-	destDir := filepath.Join(s.libraryDir, sanitize(artist.Name), sanitize(albumDir))
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	tmpl := naming.DefaultTemplate
+	if v, err := s.queries.GetSetting(naming.SettingKey); err == nil && strings.TrimSpace(v) != "" {
+		tmpl = v
+	}
+	rel, err := naming.Render(tmpl, meta)
+	if err != nil && tmpl != naming.DefaultTemplate {
+		// The API validates templates on save, so this only happens if the
+		// stored value was edited by hand or the data hits an empty-segment
+		// case. Fall back loudly rather than blocking downloads forever.
+		slog.Error("organizer: naming template failed, using default layout", "template", tmpl, "error", err)
+		rel, err = naming.Render(naming.DefaultTemplate, meta)
+	}
+	if err != nil {
+		return fmt.Errorf("organizer: render path: %w", err)
+	}
+
+	dest := filepath.Join(s.libraryDir, rel) + filepath.Ext(src)
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return err
 	}
 
-	ext := filepath.Ext(src)
-	filename := fmt.Sprintf("%02d - %s%s", track.TrackNumber, sanitize(track.Title), ext)
-	dest := filepath.Join(destDir, filename)
+	// The DB still holds the previous library path at this point (the
+	// downloader only overwrites track.FilePath in memory), so capture it to
+	// clean up the file being replaced — e.g. a quality upgrade landing at a
+	// different path after the naming template changed.
+	oldAbs := s.storedFilePath(track.ID)
 
 	if err := os.Rename(src, dest); err != nil {
 		// Cross-device: copy then remove
@@ -73,11 +94,8 @@ func (s *Service) Organize(track *models.Track) error {
 	}
 
 	slog.Info("organizer: moved", "dest", dest)
+	s.removeReplacedFile(oldAbs, dest)
 
-	year := 0
-	if album.Year != nil {
-		year = *album.Year
-	}
 	coverURL := ""
 	if album.CoverURL != nil {
 		coverURL = *album.CoverURL
@@ -102,10 +120,58 @@ func (s *Service) Organize(track *models.Track) error {
 	return s.queries.UpdateTrackFilePath(track.ID, relPath)
 }
 
-var unsafeChars = regexp.MustCompile(`[<>:"/\\|?*]`)
+// storedFilePath returns the track's current file path from the DB resolved
+// to an absolute path, or "" if the track has none (first download).
+func (s *Service) storedFilePath(trackID int64) string {
+	stored, err := s.queries.GetTrackWithMeta(trackID)
+	if err != nil || stored.FilePath == nil || *stored.FilePath == "" {
+		return ""
+	}
+	p := *stored.FilePath
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(s.libraryDir, p)
+	}
+	return filepath.Clean(p)
+}
 
-func sanitize(s string) string {
-	return strings.TrimSpace(unsafeChars.ReplaceAllString(s, "_"))
+// removeReplacedFile deletes the file a new download replaced, when it lives
+// inside the library at a different path (e.g. a quality upgrade after the
+// naming template changed). Files outside the library — imported entries
+// pointing at user-managed locations — are never touched.
+func (s *Service) removeReplacedFile(oldAbs, dest string) {
+	if oldAbs == "" || oldAbs == filepath.Clean(dest) {
+		return
+	}
+	if !insideDir(oldAbs, s.libraryDir) {
+		slog.Warn("organizer: replaced file is outside the library, leaving it", "path", oldAbs)
+		return
+	}
+	if err := os.Remove(oldAbs); err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("organizer: could not remove replaced file", "path", oldAbs, "error", err)
+		}
+		return
+	}
+	slog.Info("organizer: removed replaced file", "path", oldAbs)
+	pruneEmptyDirs(filepath.Dir(oldAbs), s.libraryDir)
+}
+
+func insideDir(path, dir string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dir), path)
+	return err == nil && rel != "." && rel != ".." &&
+		!strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// pruneEmptyDirs removes now-empty directories from dir up to (but not
+// including) root. os.Remove fails on non-empty directories, which ends the
+// walk at the first level still in use.
+func pruneEmptyDirs(dir, root string) {
+	root = filepath.Clean(root)
+	for dir = filepath.Clean(dir); dir != root && insideDir(dir, root); dir = filepath.Dir(dir) {
+		if err := os.Remove(dir); err != nil {
+			return
+		}
+	}
 }
 
 func findFile(root, name string) (string, error) {

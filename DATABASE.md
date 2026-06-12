@@ -48,7 +48,7 @@ Crate uses SQLite with WAL mode. The main database (`crate.db`) has five tables.
 | `provider` | TEXT NOT NULL | Same as album's provider |
 | `provider_id` | TEXT NOT NULL | Provider-specific track ID |
 | `status` | TEXT | `wanted`, `downloading`, `owned`, `ignored` |
-| `file_path` | TEXT | Absolute path to file on disk (set when owned) |
+| `file_path` | TEXT | Path to file on disk, set when owned. Crate stores paths relative to the library dir; absolute paths (e.g. from importers) also work. Crate never deletes files outside the library dir. |
 | `downloaded_from` | TEXT | slskd username the file was downloaded from |
 | `download_format` | TEXT | File format: `flac`, `mp3`, etc. (set at search time) |
 | `download_bitrate` | INTEGER | Bitrate in kbps (set at search time, 0 for lossless) |
@@ -76,7 +76,7 @@ Crate uses SQLite with WAL mode. The main database (`crate.db`) has five tables.
 | `key` | TEXT PK | Setting key |
 | `value` | TEXT NOT NULL | Setting value |
 
-Known keys: `provider_primary`, `slskd_url`, `slskd_api_key`, `library_path`, `download_format_preference`, `min_bitrate`, `scan_interval`, `cache_ttl_hours`, `quality_tiers` (JSON array), `upgrade_last_artist_id`, `navidrome_url`, `navidrome_user`, `navidrome_password`, `activity_retention_days`.
+Known keys: `provider_primary`, `slskd_url`, `slskd_api_key`, `library_path`, `download_format_preference`, `min_bitrate`, `scan_interval`, `cache_ttl_hours`, `quality_tiers` (JSON array), `upgrade_last_artist_id`, `navidrome_url`, `navidrome_user`, `navidrome_password`, `activity_retention_days`, `naming_template` (library folder/file layout, empty = default `{artist}/{album} ({year})/{track:2} - {title}`).
 
 ### slskd_blacklist
 

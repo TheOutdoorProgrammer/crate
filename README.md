@@ -79,7 +79,7 @@ Open `http://localhost:6969`.
 - **Quality tiers** -- configure priority-ordered quality tiers (e.g. FLAC > MP3 320 > MP3 256) with an optional fallback toggle to reject files outside your configured tiers. Scheduler scans one artist per day and re-queues tracks that can be upgraded.
 - **Negative keywords** -- skip files matching configurable keywords (e.g. acapella, instrumental) during auto-download. Manual search still shows them so you can override when needed.
 - **Navidrome integration** -- optionally trigger a Navidrome library scan after each download so new files appear immediately
-- **Organize** -- moves completed files to `library/{Artist}/{Album (Year)}/{nn} - {Title}.ext`
+- **Organize** -- moves completed files into the library using a configurable naming template (default `{artist}/{album} ({year})/{track:2} - {title}`), so Crate can match an existing library convention
 - **Metadata tagging** -- writes ID3v2 (MP3), Vorbis comments (FLAC), and RIFF INFO (WAV) with artist, album, track, year, and cover art (MP3/FLAC)
 - **New release detection** -- opt-in per artist, auto-adds albums released after the feature is enabled
 - **File integrity** -- daily check that owned tracks still exist on disk; reverts to "wanted" if missing
@@ -87,7 +87,7 @@ Open `http://localhost:6969`.
 - **Relink** -- reassign any artist to a different provider without losing your library data
 - **Scheduled scans** -- re-queues wanted tracks and checks for new releases on a configurable interval
 - **Duplicate guard** -- prevents duplicate artists, albums, and download queue entries
-- **Settings UI** -- configure providers, slskd connection, Navidrome, quality tiers, quality fallback, shadow ban duration, library path, scan interval, and more from the browser
+- **Settings UI** -- configure providers, slskd connection, Navidrome, quality tiers, quality fallback, shadow ban duration, naming template (with live preview), library path, scan interval, and more from the browser
 - **Mobile-first** -- responsive layout with bottom nav on mobile, sidebar on desktop
 
 ## Lidarr API Compatibility
@@ -144,7 +144,31 @@ Contributions to expand Lidarr API coverage are welcome.
 | `CRATE_SCAN_INTERVAL` | `6h` | How often to auto-queue wanted tracks and check for new releases |
 | `CRATE_PROVIDERS` | `musicbrainz:./provider-musicbrainz:50051,deezer:./provider-deezer:50052` | Provider configuration |
 
-Additional settings (default provider, slskd connection, Navidrome, quality tiers, library path, scan interval) can be configured from the Settings page in the UI.
+Additional settings (default provider, slskd connection, Navidrome, quality tiers, naming template, library path, scan interval) can be configured from the Settings page in the UI.
+
+### Library naming template
+
+The folder/file layout for downloads is a template you can change from **Settings → Library** (with a live preview). The default matches Crate's original layout:
+
+```
+{artist}/{album} ({year})/{track:2} - {title}
+```
+
+| Token | Meaning |
+|---|---|
+| `{artist}` / `{albumartist}` | Artist name (Crate tracks album artists, so these are identical) |
+| `{album}` | Album title |
+| `{year}` | Album release year (renders empty when unknown) |
+| `{track}` | Track number; zero-pad with a width, e.g. `{track:2}` → `06` |
+| `{disc}` | Disc number; supports padding; renders empty when unknown |
+| `{title}` | Track title |
+
+Notes:
+
+- The file extension is appended automatically -- don't put it in the template.
+- When an empty token (like `{year}`) leaves dangling decoration behind, Crate cleans it up: `{album} ({year})` renders as `Album Title` when the year is unknown, not `Album Title ()`.
+- The template applies to **new downloads only**. Existing files are never renamed when you change it. Quality upgrades use the current template and remove the file they replace, even if it was organized under an older template.
+- Filesystem-unsafe characters (`<>:"/\|?*`) in metadata are replaced with `_`.
 
 ## Auth
 

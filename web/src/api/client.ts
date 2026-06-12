@@ -106,6 +106,8 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(settings),
     }),
+  namingPreview: (template: string) =>
+    request<{ path: string }>(`/settings/naming-preview?template=${encodeURIComponent(template)}`),
 
   getStatus: () => request<SystemStatus>('/status'),
 
