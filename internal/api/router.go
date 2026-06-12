@@ -16,6 +16,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/importer"
 )
 
 type Server struct {
@@ -24,6 +25,7 @@ type Server struct {
 	cache       *cache.Cache
 	downloader  *downloader.Service
 	activityLog *activity.Log
+	importer    *importer.Service
 	router      chi.Router
 	frontendFS  fs.FS
 	bgWork      sync.WaitGroup
@@ -39,6 +41,7 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 		cache:       c,
 		downloader:  dl,
 		activityLog: actLog,
+		importer:    importer.NewService(queries, libraryDir, actLog),
 		frontendFS:  frontendFS,
 		startTime:   time.Now().UTC(),
 		libraryDir:  libraryDir,
@@ -154,6 +157,11 @@ func (s *Server) setupRouter() chi.Router {
 			r.Get("/", s.handleGetSettings)
 			r.Put("/", s.handleUpdateSettings)
 			r.Get("/naming-preview", s.handleNamingPreview)
+		})
+
+		r.Route("/library/import", func(r chi.Router) {
+			r.Post("/", s.handleStartImport)
+			r.Get("/", s.handleImportStatus)
 		})
 	})
 

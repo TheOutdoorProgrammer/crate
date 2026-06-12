@@ -78,6 +78,7 @@ Open `http://localhost:6969`.
 - **Manual search** -- browse all slskd results for a track, see scores/format/queue info, and pick which one to download
 - **Quality tiers** -- configure priority-ordered quality tiers (e.g. FLAC > MP3 320 > MP3 256) with an optional fallback toggle to reject files outside your configured tiers. Scheduler scans one artist per day and re-queues tracks that can be upgraded.
 - **Negative keywords** -- skip files matching configurable keywords (e.g. acapella, instrumental) during auto-download. Manual search still shows them so you can override when needed.
+- **Import existing library** -- tag-based scan of your on-disk collection with dry-run preview; MusicBrainz-tagged files (Picard/beets) link to their real provider IDs automatically
 - **Navidrome integration** -- optionally trigger a Navidrome library scan after each download so new files appear immediately
 - **Organize** -- moves completed files into the library using a configurable naming template (default `{artist}/{album} ({year})/{track:2} - {title}`), so Crate can match an existing library convention
 - **Metadata tagging** -- writes ID3v2 (MP3), Vorbis comments (FLAC), and RIFF INFO (WAV) with artist, album, track, year, and cover art (MP3/FLAC)
@@ -125,9 +126,21 @@ The shim accepts any API key in the `X-Api-Key` header or `apikey` query paramet
 
 Contributions to expand Lidarr API coverage are welcome.
 
-## Roadmap
+## Importing an Existing Library
 
-- [ ] **Import existing library** -- see [DATABASE.md](DATABASE.md) for schema docs to write custom importers
+Crate can adopt a library it didn't download. **Settings → Library → Import Existing Library** scans your library folder, reads embedded tags (MP3 and FLAC), and records everything as `owned` — run the dry-run scan first to preview the result.
+
+How it works:
+
+- **Tag-based, not path-based.** Folder structure is ignored entirely; only embedded metadata matters. If your library works in Navidrome, your tags are good enough.
+- **Non-destructive.** Files are never moved, renamed, or modified. Changing the naming template later doesn't touch imported files either.
+- **MusicBrainz-tagged libraries link automatically.** Files tagged by Picard or beets carry MusicBrainz IDs; those import under the `musicbrainz` provider with their real IDs (artist MBID, release-group ID, release-track ID) and behave exactly like browsed entities. Everything else imports under the reserved `local` provider with stable tag-derived IDs — relink an artist to a real provider whenever you want search, cover art, or new-release watching for it.
+- **Wanted tracks get claimed.** If you already watch an album and import files matching its tracks (by title), those tracks flip to `owned` instead of being re-downloaded.
+- **Idempotent.** Re-running an import skips everything it already knows.
+- **Quality upgrades apply.** Imported tracks record their real format and bitrate (parsed from the files), so the upgrade scanner treats them like any other owned track — import MP3s with a FLAC-first tier list and Crate will gradually upgrade them. Files outside the library folder are never deleted, even when replaced by an upgrade.
+- Files with missing artist/album/title tags are skipped and reported, with reasons.
+
+Prefer a custom importer? The schema is documented in [DATABASE.md](DATABASE.md).
 
 ## Configuration
 

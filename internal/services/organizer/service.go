@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
+	"github.com/TheOutdoorProgrammer/crate/internal/library"
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
 	"github.com/TheOutdoorProgrammer/crate/internal/naming"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/tagger"
@@ -127,11 +128,7 @@ func (s *Service) storedFilePath(trackID int64) string {
 	if err != nil || stored.FilePath == nil || *stored.FilePath == "" {
 		return ""
 	}
-	p := *stored.FilePath
-	if !filepath.IsAbs(p) {
-		p = filepath.Join(s.libraryDir, p)
-	}
-	return filepath.Clean(p)
+	return library.ResolvePath(s.libraryDir, *stored.FilePath)
 }
 
 // removeReplacedFile deletes the file a new download replaced, when it lives
@@ -142,7 +139,7 @@ func (s *Service) removeReplacedFile(oldAbs, dest string) {
 	if oldAbs == "" || oldAbs == filepath.Clean(dest) {
 		return
 	}
-	if !insideDir(oldAbs, s.libraryDir) {
+	if !library.Contains(s.libraryDir, oldAbs) {
 		slog.Warn("organizer: replaced file is outside the library, leaving it", "path", oldAbs)
 		return
 	}
@@ -156,18 +153,12 @@ func (s *Service) removeReplacedFile(oldAbs, dest string) {
 	pruneEmptyDirs(filepath.Dir(oldAbs), s.libraryDir)
 }
 
-func insideDir(path, dir string) bool {
-	rel, err := filepath.Rel(filepath.Clean(dir), path)
-	return err == nil && rel != "." && rel != ".." &&
-		!strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
 // pruneEmptyDirs removes now-empty directories from dir up to (but not
 // including) root. os.Remove fails on non-empty directories, which ends the
 // walk at the first level still in use.
 func pruneEmptyDirs(dir, root string) {
 	root = filepath.Clean(root)
-	for dir = filepath.Clean(dir); dir != root && insideDir(dir, root); dir = filepath.Dir(dir) {
+	for dir = filepath.Clean(dir); dir != root && library.Contains(root, dir); dir = filepath.Dir(dir) {
 		if err := os.Remove(dir); err != nil {
 			return
 		}

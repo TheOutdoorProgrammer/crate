@@ -37,6 +37,13 @@ type providerConn struct {
 	client pb.MusicProviderClient
 }
 
+// LocalProvider is the reserved provider name for entities created by the
+// library importer rather than fetched from a real metadata provider. It is
+// always considered healthy (the data lives in Crate's own DB), never routes
+// gRPC calls, and entities carrying it can be relinked to a real provider at
+// any time.
+const LocalProvider = "local"
+
 func NewManager(cache *cache.Cache, queries *db.Queries) *Manager {
 	return &Manager{
 		providers: make(map[string]*providerConn),
@@ -46,6 +53,9 @@ func NewManager(cache *cache.Cache, queries *db.Queries) *Manager {
 }
 
 func (m *Manager) RegisterProvider(ctx context.Context, name, address string) error {
+	if name == LocalProvider {
+		return fmt.Errorf("provider name %q is reserved for imported library entries", LocalProvider)
+	}
 	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return fmt.Errorf("connect to provider %s at %s: %w", name, address, err)
@@ -103,6 +113,9 @@ func (m *Manager) ListProviders() []ProviderInfo {
 }
 
 func (m *Manager) IsHealthy(name string) bool {
+	if name == LocalProvider {
+		return true
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	p, ok := m.providers[name]

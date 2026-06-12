@@ -226,3 +226,26 @@ export interface UserCooldown {
   expires_at: string;
   created_at: string;
 }
+
+export interface ImportReport {
+  artists_added: number;
+  albums_added: number;
+  tracks_added: number;
+  tracks_claimed: number;
+  tracks_known: number;
+  musicbrainz_linked: number;
+  duplicate_files: number;
+  files_skipped: number;
+  skipped_samples?: { path: string; reason: string }[];
+}
+
+export interface ImportState {
+  status: 'idle' | 'running' | 'done' | 'failed';
+  dry_run: boolean;
+  path?: string;
+  started_at?: string;
+  processed: number;
+  total: number;
+  report?: ImportReport;
+  error?: string;
+}

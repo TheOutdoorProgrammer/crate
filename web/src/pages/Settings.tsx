@@ -96,6 +96,26 @@ export default function Settings() {
     return () => clearTimeout(handle);
   }, [form.naming_template]);
 
+  const importStatus = useQuery({
+    queryKey: ['library-import'],
+    queryFn: api.libraryImportStatus,
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? 1000 : false),
+  });
+
+  const runImport = useMutation({
+    mutationFn: (dryRun: boolean) => api.startLibraryImport(dryRun),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['library-import'] }),
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  // Refresh library stats once a real import lands.
+  const importDone = importStatus.data?.status === 'done' && !importStatus.data.dry_run;
+  useEffect(() => {
+    if (importDone) {
+      queryClient.invalidateQueries({ queryKey: ['status'] });
+    }
+  }, [importDone, queryClient]);
+
   const save = useMutation({
     mutationFn: () => api.updateSettings({
       ...form,
@@ -196,6 +216,81 @@ export default function Settings() {
         </p>
         <div className={`mt-2 rounded-lg px-3 py-2 text-[11px] font-mono break-all ${namingPreview.error ? 'bg-red-950/40 text-red-400' : 'bg-zinc-800/50 text-zinc-400'}`}>
           {namingPreview.error ?? namingPreview.path ?? '…'}
+        </div>
+
+        <div className="mt-5 pt-4 border-t border-zinc-800">
+          <p className="text-xs text-zinc-400 mb-1">Import Existing Library</p>
+          <p className="text-[11px] text-zinc-600 mb-3">
+            Scans the embedded tags of MP3/FLAC files in your library folder and records what you
+            already own. Files are never moved, renamed, or modified — folder structure doesn't
+            matter, only tags. MusicBrainz-tagged files (Picard, beets) link to MusicBrainz
+            automatically; everything else can be relinked to a provider later. Run a scan first
+            to preview what would happen.
+          </p>
+
+          {importStatus.data?.status === 'running' && (
+            <div className="mb-3 rounded-lg bg-zinc-800/50 px-3 py-2 text-[11px] text-zinc-400">
+              {importStatus.data.dry_run ? 'Scanning' : 'Importing'}… {importStatus.data.processed}
+              {importStatus.data.total > 0 && ` / ${importStatus.data.total}`} files
+            </div>
+          )}
+
+          {importStatus.data?.status === 'failed' && (
+            <div className="mb-3 rounded-lg bg-red-950/40 px-3 py-2 text-[11px] text-red-400">
+              Import failed: {importStatus.data.error}
+            </div>
+          )}
+
+          {importStatus.data?.status === 'done' && importStatus.data.report && (
+            <div className="mb-3 rounded-lg bg-zinc-800/50 px-3 py-2.5 text-[11px] text-zinc-400 space-y-1">
+              <p className="text-zinc-300 font-medium">
+                {importStatus.data.dry_run ? 'Scan result (nothing was changed):' : 'Import complete:'}
+              </p>
+              <p>
+                {importStatus.data.report.artists_added} artists · {importStatus.data.report.albums_added} albums · {importStatus.data.report.tracks_added} tracks
+                {importStatus.data.dry_run ? ' would be added' : ' added'}
+              </p>
+              {importStatus.data.report.tracks_claimed > 0 && (
+                <p>{importStatus.data.report.tracks_claimed} wanted tracks matched files you already have</p>
+              )}
+              {importStatus.data.report.musicbrainz_linked > 0 && (
+                <p>{importStatus.data.report.musicbrainz_linked} tracks linked to MusicBrainz via tags</p>
+              )}
+              {importStatus.data.report.tracks_known > 0 && (
+                <p>{importStatus.data.report.tracks_known} already known</p>
+              )}
+              {importStatus.data.report.duplicate_files > 0 && (
+                <p>{importStatus.data.report.duplicate_files} duplicate files ignored</p>
+              )}
+              {importStatus.data.report.files_skipped > 0 && (
+                <div>
+                  <p className="text-amber-400/80">{importStatus.data.report.files_skipped} files skipped</p>
+                  {importStatus.data.report.skipped_samples?.slice(0, 5).map((sf, i) => (
+                    <p key={i} className="font-mono text-[10px] text-zinc-600 truncate">
+                      {sf.path} — {sf.reason}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => runImport.mutate(true)}
+              disabled={runImport.isPending || importStatus.data?.status === 'running'}
+              className="px-3 py-2 bg-zinc-800 text-zinc-300 rounded-lg text-xs font-medium active:bg-zinc-700 transition-colors disabled:opacity-50"
+            >
+              Scan (Dry Run)
+            </button>
+            <button
+              onClick={() => runImport.mutate(false)}
+              disabled={runImport.isPending || importStatus.data?.status === 'running'}
+              className="px-3 py-2 bg-zinc-800 text-zinc-300 rounded-lg text-xs font-medium active:bg-zinc-700 transition-colors disabled:opacity-50"
+            >
+              Import Library
+            </button>
+          </div>
         </div>
       </SettingsSection>
 

@@ -16,6 +16,7 @@ internal/
   config/                       Env-based config (CRATE_* vars)
   db/                           SQLite via modernc.org/sqlite, goose migrations, raw SQL queries
   migrations/                   Embedded .sql migration files
+  library/                      Shared track-path helpers (ResolvePath, Contains) — all file_path resolution goes through here
   models/                       Shared structs and status enums
   naming/                       Library path templates: parse/validate/render ({artist}/{album}/...)
   provider/
@@ -25,6 +26,7 @@ internal/
     slskd/                      slskd API client (Soulseek daemon)
     downloader/                 Background download queue processor (tick every 10s)
     scheduler/                  Background periodic jobs (new release detection, auto-queue, quality upgrades)
+    importer/                   Library import: tag-based scan of existing files into the DB
     organizer/                  Moves downloaded files into library using the naming template
     tagger/                     ID3/FLAC metadata tagging + cover art embedding
     navidrome/                  Optional Navidrome integration (triggers library scan after download)
@@ -130,6 +132,18 @@ File/folder layout is templated, not hardcoded (issue #1). All logic lives in `i
 - Validation: relative paths only, no `.`/`..` segments, last segment must contain `{title}` or `{track}`, unknown tokens rejected. Enforced in `handleUpdateSettings` (validate-all-before-save) and defensively at render time (organizer falls back to `DefaultTemplate` with `slog.Error`).
 - `GET /api/settings/naming-preview?template=...` renders sample metadata for the Settings UI live preview (debounced 350ms client-side).
 - Template changes apply to new downloads only — existing files are never renamed. The organizer captures the DB-stored `file_path` before moving (the downloader only overwrites it in memory) and deletes the replaced file when it's inside the library at a different path (quality upgrade after a template change), pruning now-empty dirs. Files outside the library (imported) are never deleted.
+
+## Library Import
+
+`internal/services/importer` adopts an existing on-disk library (issue #1, second half). Tag-based and non-destructive: walks the library dir (or a given path), reads embedded tags (MP3 via id3v2, FLAC via go-flac/flacvorbis — the only formats Crate tags), groups artist→album→track, and records rows with `status = owned`. Files are never moved, renamed, or written to. Async single-flight job: `POST /api/library/import` (`{path?, dry_run}`, 409 when one is running), `GET /api/library/import` for progress/report; UI lives in Settings → Library.
+
+Key invariants:
+
+- **Provider identity**: files with consistent MusicBrainz tags import under `musicbrainz` with real IDs — artist MBID, **release-group** ID for albums, **release-track** ID for tracks (matching the MB provider's namespace in `cmd/provider-musicbrainz`: albums are release-groups, browse tracks are release-tracks). Everything else gets `provider.LocalProvider` ("local") with stable tag-derived hash IDs (`loc-…`, never path-derived). `local` is reserved: always healthy (no orphan badge), rejected by `RegisterProvider`, never routed. Relink is the promotion path to a real provider.
+- **Reuse before create**: artists match by (provider, provider_id) then case-insensitive name; albums by provider then title under the artist; tracks by provider then title within the album. A wanted track matching an imported file is **claimed** (flips to owned with the file path) — its provider identity is never rewritten.
+- **Quality data is real**: `download_format` from the file, `download_bitrate` parsed from MP3 frame headers (Xing/VBR aware, `internal/services/importer/mp3info.go`) or 0 for FLAC (lossless convention). Without this, `IsUpgradeable` would treat every imported track as upgradeable and re-download the entire library one artist per day.
+- **file_path convention**: relative when inside the library dir, absolute otherwise. All resolution goes through `internal/library` (`ResolvePath`/`Contains`) — used by the organizer, `deleteTrackFile`, the scheduler's integrity check, and the importer. Destructive operations require `Contains` (files outside the library are never deleted).
+- Dry-run runs the identical code path with writes skipped, so its counts are exact. Re-runs are idempotent. Skipped files (missing artist/album/title) are reported with reasons, capped at 100 samples.
 
 ## Navidrome Integration
 

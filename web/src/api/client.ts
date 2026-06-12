@@ -1,4 +1,4 @@
-import type { Artist, Album, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown } from '../types/index';
+import type { Artist, Album, Track, SearchResponse, BrowseArtistResult, BrowseAlbumDetail, DownloadQueueItem, DownloadProgress, SystemStatus, ProviderInfo, ActivityResponse, ManualSearchStart, ManualSearchResponse, LibrarySearchResult, TrackSearchResult, BlacklistEntry, UserCooldown, ImportState } from '../types/index';
 
 const BASE = '/api';
 
@@ -108,6 +108,12 @@ export const api = {
     }),
   namingPreview: (template: string) =>
     request<{ path: string }>(`/settings/naming-preview?template=${encodeURIComponent(template)}`),
+  startLibraryImport: (dryRun: boolean) =>
+    request<ImportState>('/library/import', {
+      method: 'POST',
+      body: JSON.stringify({ dry_run: dryRun }),
+    }),
+  libraryImportStatus: () => request<ImportState>('/library/import'),
 
   getStatus: () => request<SystemStatus>('/status'),
 

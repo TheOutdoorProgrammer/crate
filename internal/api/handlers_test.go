@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	id3v2 "github.com/bogem/id3v2/v2"
 	"google.golang.org/grpc"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/activity"
@@ -1180,6 +1181,104 @@ func TestNamingPreview(t *testing.T) {
 	errResp := decode[map[string]string](t, w)
 	if !strings.Contains(errResp["error"], "{title} or {track}") {
 		t.Errorf("error should explain the problem, got %q", errResp["error"])
+	}
+}
+
+// writeImportFixtureMP3 fabricates a tagged MP3 the library importer can read.
+func writeImportFixtureMP3(t *testing.T, path, artist, album, title string, track int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	frame := make([]byte, 417)
+	frame[0] = 0xFF
+	frame[1] = 0xFB
+	frame[2] = 0x90
+	if err := os.WriteFile(path, frame, 0644); err != nil {
+		t.Fatal(err)
+	}
+	tag, err := id3v2.Open(path, id3v2.Options{Parse: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tag.Close()
+	tag.SetDefaultEncoding(id3v2.EncodingUTF8)
+	tag.SetTitle(title)
+	tag.SetArtist(artist)
+	tag.SetAlbum(album)
+	tag.AddTextFrame("TRCK", id3v2.EncodingUTF8, fmt.Sprintf("%d", track))
+	if err := tag.Save(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func waitForImport(t *testing.T, env *testEnv) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		w := env.do("GET", "/api/library/import", "")
+		st := decode[map[string]any](t, w)
+		switch st["status"] {
+		case "done":
+			return st
+		case "failed":
+			t.Fatalf("import failed: %v", st["error"])
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("import did not finish in time")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestLibraryImportAPI(t *testing.T) {
+	libDir := t.TempDir()
+	writeImportFixtureMP3(t, filepath.Join(libDir, "Radiohead", "OK Computer", "01 Airbag.mp3"),
+		"Radiohead", "OK Computer", "Airbag", 1)
+	env := newTestEnvWithLibrary(t, libDir)
+
+	// Idle status before anything runs.
+	w := env.do("GET", "/api/library/import", "")
+	if w.Code != 200 {
+		t.Fatalf("status: expected 200, got %d", w.Code)
+	}
+	if st := decode[map[string]any](t, w); st["status"] != "idle" {
+		t.Fatalf("initial status = %v, want idle", st["status"])
+	}
+
+	// Dry run: counts but no rows.
+	w = env.do("POST", "/api/library/import", `{"dry_run": true}`)
+	if w.Code != 202 {
+		t.Fatalf("dry-run start: expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+	st := waitForImport(t, env)
+	report := st["report"].(map[string]any)
+	if int(report["tracks_added"].(float64)) != 1 {
+		t.Fatalf("dry-run tracks_added = %v, want 1", report["tracks_added"])
+	}
+	if artists, _ := env.queries.ListArtists(); len(artists) != 0 {
+		t.Fatalf("dry run created %d artists, want 0", len(artists))
+	}
+
+	// Real import.
+	w = env.do("POST", "/api/library/import", `{}`)
+	if w.Code != 202 {
+		t.Fatalf("start: expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+	st = waitForImport(t, env)
+	report = st["report"].(map[string]any)
+	if int(report["tracks_added"].(float64)) != 1 || int(report["artists_added"].(float64)) != 1 {
+		t.Fatalf("report = %v, want 1 track / 1 artist", report)
+	}
+	artists, _ := env.queries.ListArtists()
+	if len(artists) != 1 || artists[0].Provider != "local" {
+		t.Fatalf("imported artist = %+v, want one local-provider artist", artists)
+	}
+
+	// Bad path is rejected synchronously.
+	w = env.do("POST", "/api/library/import", `{"path": "/definitely/not/a/real/dir"}`)
+	if w.Code != 400 {
+		t.Errorf("bad path: expected 400, got %d", w.Code)
 	}
 }
 

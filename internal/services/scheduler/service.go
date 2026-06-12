@@ -10,6 +10,7 @@ import (
 
 	"github.com/TheOutdoorProgrammer/crate/internal/activity"
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
+	"github.com/TheOutdoorProgrammer/crate/internal/library"
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
@@ -19,14 +20,16 @@ type Service struct {
 	queries     *db.Queries
 	providers   *provider.Manager
 	activityLog *activity.Log
+	libraryDir  string
 	interval    time.Duration
 }
 
-func NewService(queries *db.Queries, providers *provider.Manager, actLog *activity.Log, interval time.Duration) *Service {
+func NewService(queries *db.Queries, providers *provider.Manager, actLog *activity.Log, libraryDir string, interval time.Duration) *Service {
 	return &Service{
 		queries:     queries,
 		providers:   providers,
 		activityLog: actLog,
+		libraryDir:  libraryDir,
 		interval:    interval,
 	}
 }
@@ -179,7 +182,7 @@ func (s *Service) checkFileIntegrity() {
 		if t.FilePath == nil {
 			continue
 		}
-		if _, err := os.Stat(*t.FilePath); os.IsNotExist(err) {
+		if _, err := os.Stat(library.ResolvePath(s.libraryDir, *t.FilePath)); os.IsNotExist(err) {
 			if err := s.queries.UpdateTrackStatus(t.ID, models.TrackStatusWanted); err != nil {
 				slog.Error("scheduler: revert track", "track_id", t.ID, "error", err)
 				continue

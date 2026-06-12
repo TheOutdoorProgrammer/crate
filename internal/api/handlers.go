@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
+	"github.com/TheOutdoorProgrammer/crate/internal/library"
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
 	"github.com/TheOutdoorProgrammer/crate/internal/naming"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
@@ -1133,6 +1133,34 @@ func (s *Server) handleNamingPreview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"path": path + ".flac"})
 }
 
+// Library import
+
+func (s *Server) handleStartImport(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path   string `json:"path"`
+		DryRun bool   `json:"dry_run"`
+	}
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	if err := s.importer.Start(req.Path, req.DryRun); err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "already running") {
+			status = http.StatusConflict
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, s.importer.Status())
+}
+
+func (s *Server) handleImportStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.importer.Status())
+}
+
 // Blacklist & Cooldowns
 
 func (s *Server) handleListBlacklist(w http.ResponseWriter, r *http.Request) {
@@ -1300,19 +1328,12 @@ func deleteTrackFile(libraryDir string, track *models.Track) {
 	if track.FilePath == nil || libraryDir == "" {
 		return
 	}
-	fp := *track.FilePath
-	var fullPath string
-	if filepath.IsAbs(fp) {
-		fullPath = fp
-	} else {
-		fullPath = filepath.Join(libraryDir, fp)
-	}
-	cleaned := filepath.Clean(fullPath)
-	if !strings.HasPrefix(cleaned, filepath.Clean(libraryDir)+string(filepath.Separator)) {
+	cleaned := library.ResolvePath(libraryDir, *track.FilePath)
+	if !library.Contains(libraryDir, cleaned) {
 		slog.Error("reject: path escapes library dir", "path", cleaned)
 		return
 	}
-	if err := os.Remove(cleaned); err != nil {
+	if err := os.Remove(cleaned); err != nil { // #nosec G703 -- cleaned is resolved and confined to libraryDir by library.Contains above
 		slog.Error("reject: failed to delete file", "path", cleaned, "error", err)
 	} else {
 		slog.Info("reject: deleted file", "path", cleaned)
