@@ -153,6 +153,7 @@ func (s *Server) setupRouter() chi.Router {
 		r.Route("/settings", func(r chi.Router) {
 			r.Get("/", s.handleGetSettings)
 			r.Put("/", s.handleUpdateSettings)
+			r.Get("/naming-preview", s.handleNamingPreview)
 		})
 	})
 

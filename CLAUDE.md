@@ -17,6 +17,7 @@ internal/
   db/                           SQLite via modernc.org/sqlite, goose migrations, raw SQL queries
   migrations/                   Embedded .sql migration files
   models/                       Shared structs and status enums
+  naming/                       Library path templates: parse/validate/render ({artist}/{album}/...)
   provider/
     manager.go                  Provider registry, search+enrichment, caching, health checks
     process.go                  Child process management for built-in providers
@@ -24,7 +25,7 @@ internal/
     slskd/                      slskd API client (Soulseek daemon)
     downloader/                 Background download queue processor (tick every 10s)
     scheduler/                  Background periodic jobs (new release detection, auto-queue, quality upgrades)
-    organizer/                  Moves downloaded files into library, renames by convention
+    organizer/                  Moves downloaded files into library using the naming template
     tagger/                     ID3/FLAC metadata tagging + cover art embedding
     navidrome/                  Optional Navidrome integration (triggers library scan after download)
 web/                            React frontend (Vite, Tailwind, React Query, React Router)
@@ -118,6 +119,17 @@ The `quality_fallback_enabled` setting (default true) controls whether files out
 - `download_format` and `download_bitrate` recorded on tracks at search time (when the slskd result is picked)
 - Scheduler scans one artist per day (round-robin via `upgrade_last_artist_id` setting), re-queues owned tracks that can be upgraded to a higher-priority tier
 - `QualityTierRank()` and `IsUpgradeable()` in `internal/services/downloader/` handle tier ranking
+
+## Library Naming Template
+
+File/folder layout is templated, not hardcoded (issue #1). All logic lives in `internal/naming` (pure, no I/O): `Validate(template)`, `Render(template, Meta)`, `DefaultTemplate`, and `SettingKey` (`naming_template` in the settings table; empty/missing = default).
+
+- Tokens: `{artist}`/`{albumartist}` (identical — Crate only models album artists), `{album}`, `{year}`, `{track}`, `{disc}`, `{title}`. Numeric pad: `{track:2}`. Extension is appended by the organizer, never templated.
+- Empty tokens (`{year}`/`{disc}` when unknown) use a `\x00` marker so cleanup strips *template* decoration (empty parens/brackets, dangling separators) without touching the same characters in real metadata (e.g. Sigur Rós's album "( )").
+- Segments are sanitized after rendering (`<>:"/\|?*` → `_`), so unsafe chars in template literals are neutralized too. If no token in a segment rendered empty, whitespace is preserved byte-for-byte — the default template must produce byte-identical paths to the old hardcoded layout.
+- Validation: relative paths only, no `.`/`..` segments, last segment must contain `{title}` or `{track}`, unknown tokens rejected. Enforced in `handleUpdateSettings` (validate-all-before-save) and defensively at render time (organizer falls back to `DefaultTemplate` with `slog.Error`).
+- `GET /api/settings/naming-preview?template=...` renders sample metadata for the Settings UI live preview (debounced 350ms client-side).
+- Template changes apply to new downloads only — existing files are never renamed. The organizer captures the DB-stored `file_path` before moving (the downloader only overwrites it in memory) and deletes the replaced file when it's inside the library at a different path (quality upgrade after a template change), pruning now-empty dirs. Files outside the library (imported) are never deleted.
 
 ## Navidrome Integration
 

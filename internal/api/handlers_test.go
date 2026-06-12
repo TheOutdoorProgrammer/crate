@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1121,6 +1122,64 @@ func TestSettingsSensitiveNotOverwrittenWithPlaceholder(t *testing.T) {
 	v, _ := env.queries.GetSetting("navidrome_password")
 	if v != "real_password" {
 		t.Errorf("expected password to remain 'real_password', got %q", v)
+	}
+}
+
+func TestSettingsNamingTemplateValidated(t *testing.T) {
+	env := newTestEnv(t)
+
+	w := env.do("PUT", "/api/settings", `{"naming_template": "{artist}/{bogus}/{title}", "theme": "dark"}`)
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for invalid template, got %d", w.Code)
+	}
+
+	// Nothing from the rejected request may be saved.
+	if v, _ := env.queries.GetSetting("theme"); v != "" {
+		t.Errorf("rejected request must not save other settings, got theme=%q", v)
+	}
+
+	w = env.do("PUT", "/api/settings", `{"naming_template": "{artist}/{artist} - {year} - {album}/{track:2} {title}"}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for valid template, got %d", w.Code)
+	}
+	v, _ := env.queries.GetSetting("naming_template")
+	if v != "{artist}/{artist} - {year} - {album}/{track:2} {title}" {
+		t.Errorf("template not saved, got %q", v)
+	}
+
+	// Empty value resets to the default layout and is allowed.
+	w = env.do("PUT", "/api/settings", `{"naming_template": ""}`)
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for empty template, got %d", w.Code)
+	}
+}
+
+func TestNamingPreview(t *testing.T) {
+	env := newTestEnv(t)
+
+	w := env.do("GET", "/api/settings/naming-preview", "")
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for default preview, got %d", w.Code)
+	}
+	resp := decode[map[string]string](t, w)
+	if resp["path"] != "Radiohead/OK Computer (1997)/06 - Karma Police.flac" {
+		t.Errorf("unexpected default preview path %q", resp["path"])
+	}
+
+	tmpl := url.QueryEscape("{artist}/{artist} - {year} - {album}/{track:2} {title}")
+	w = env.do("GET", "/api/settings/naming-preview?template="+tmpl, "")
+	resp = decode[map[string]string](t, w)
+	if resp["path"] != "Radiohead/Radiohead - 1997 - OK Computer/06 Karma Police.flac" {
+		t.Errorf("unexpected custom preview path %q", resp["path"])
+	}
+
+	w = env.do("GET", "/api/settings/naming-preview?template="+url.QueryEscape("{artist}/{album}"), "")
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for invalid template, got %d", w.Code)
+	}
+	errResp := decode[map[string]string](t, w)
+	if !strings.Contains(errResp["error"], "{title} or {track}") {
+		t.Errorf("error should explain the problem, got %q", errResp["error"])
 	}
 }
 

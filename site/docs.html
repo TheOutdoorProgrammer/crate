@@ -400,6 +400,7 @@
         <div class="sidebar-heading">Configuration</div>
         <a href="#environment-variables" class="sidebar-link">Environment Variables</a>
         <a href="#settings" class="sidebar-link">UI Settings</a>
+        <a href="#naming-template" class="sidebar-link">Naming Template</a>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-heading">Concepts</div>
@@ -443,7 +444,7 @@
   │   └── gRPC → custom external provider
   ├── Scheduler (new releases, auto-queue, quality upgrades)
   ├── Downloader (slskd integration)
-  ├── Organizer (file moves + renaming)
+  ├── Organizer (file moves + naming template)
   ├── Tagger (ID3/FLAC metadata + cover art)
   └── Navidrome notifier (optional library scan trigger)</div>
 
@@ -545,7 +546,7 @@
             <tr>
               <td><code>CRATE_LIBRARY_PATH</code></td>
               <td><code>./library</code></td>
-              <td>Directory where organized music files are placed. Structure: <code>Artist/Album/Track.ext</code></td>
+              <td>Directory where organized music files are placed. Layout is controlled by the <a href="#naming-template">naming template</a>.</td>
             </tr>
             <tr>
               <td><code>CRATE_SCAN_INTERVAL</code></td>
@@ -615,6 +616,11 @@
               <td><code>negative_keywords</code></td>
               <td><code>[]</code></td>
               <td>JSON array of keywords (e.g. <code>["acapella", "instrumental"]</code>). Files matching any keyword are skipped during auto-download. Manual search still shows them, marked as negative matches.</td>
+            </tr>
+            <tr>
+              <td><code>naming_template</code></td>
+              <td><code>{artist}/{album} ({year})/{track:2} - {title}</code></td>
+              <td>Folder/file layout for new downloads. See <a href="#naming-template">Naming Template</a>. Empty = default.</td>
             </tr>
             <tr>
               <td><code>max_concurrent_slskd</code></td>
@@ -689,6 +695,62 @@
         <strong>Note:</strong> Settings like <code>slskd_url</code>, <code>slskd_api_key</code>, <code>library_path</code>, and <code>scan_interval</code> can be set via environment variables at startup <em>or</em> overridden in the UI. The UI value takes precedence when set.
       </div>
 
+      <!-- Naming Template -->
+      <h2 id="naming-template">Naming Template</h2>
+
+      <p>The folder and file layout for downloads is a template you can change from <strong>Settings &rarr; Library</strong>, with a live preview as you type. Use it to match an existing library convention (e.g. one served by Navidrome) so Crate's downloads slot in cleanly. The default matches Crate's original layout:</p>
+
+      <pre><code>{artist}/{album} ({year})/{track:2} - {title}</code></pre>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Token</th>
+              <th>Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>{artist}</code> / <code>{albumartist}</code></td>
+              <td>Artist name. Crate tracks album artists, so these are identical &mdash; <code>{albumartist}</code> exists for familiarity with Lidarr/beets templates.</td>
+            </tr>
+            <tr>
+              <td><code>{album}</code></td>
+              <td>Album title.</td>
+            </tr>
+            <tr>
+              <td><code>{year}</code></td>
+              <td>Album release year. Renders empty when unknown.</td>
+            </tr>
+            <tr>
+              <td><code>{track}</code></td>
+              <td>Track number. Zero-pad with a width: <code>{track:2}</code> renders 6 as <code>06</code>.</td>
+            </tr>
+            <tr>
+              <td><code>{disc}</code></td>
+              <td>Disc number. Supports padding. Renders empty when unknown.</td>
+            </tr>
+            <tr>
+              <td><code>{title}</code></td>
+              <td>Track title.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Example: to match the common <code>Artist/Artist - Year - Album</code> convention:</p>
+
+      <pre><code>{artist}/{artist} - {year} - {album}/{track:2} {title}</code></pre>
+
+      <h3>Behavior</h3>
+      <ul>
+        <li><strong>Extension is automatic</strong> &mdash; the downloaded file's extension is appended; don't put it in the template.</li>
+        <li><strong>Empty tokens clean up after themselves</strong> &mdash; when <code>{year}</code> is unknown, <code>{album} ({year})</code> renders as <code>Album Title</code>, not <code>Album Title ()</code>. Dangling separators next to empty tokens are removed the same way.</li>
+        <li><strong>New downloads only</strong> &mdash; changing the template never renames existing files. Quality upgrades organize with the current template and remove the file they replace, even if it lived at a path from an older template.</li>
+        <li><strong>Safety</strong> &mdash; templates must be relative paths, the filename must contain <code>{title}</code> or <code>{track}</code>, and filesystem-unsafe characters (<code>&lt;&gt;:"/\|?*</code>) in metadata are replaced with <code>_</code>. Invalid templates are rejected when you save.</li>
+      </ul>
+
       <!-- Providers -->
       <h2 id="providers">Providers</h2>
 
@@ -753,7 +815,7 @@
         <li><strong>Search</strong> &mdash; Crate searches slskd (Soulseek) for each wanted track, scoring all results through a unified <a href="#scoring">scoring system</a>.</li>
         <li><strong>Selection</strong> &mdash; the highest-scoring result is selected. Blacklisted files, shadow-banned users, and files outside configured tiers (when fallback is disabled) are excluded.</li>
         <li><strong>Download</strong> &mdash; the file is downloaded via slskd. Track status changes to <code>downloading</code>. The downloader checks progress every 10 seconds.</li>
-        <li><strong>Organize</strong> &mdash; completed downloads are moved into the library with the naming convention <code>Artist/Album/Track.ext</code>.</li>
+        <li><strong>Organize</strong> &mdash; completed downloads are moved into the library using the configurable <a href="#naming-template">naming template</a>.</li>
         <li><strong>Tag</strong> &mdash; metadata (artist, album, track name, track number, year) and cover art are embedded into the file.</li>
         <li><strong>Notify</strong> &mdash; if Navidrome is configured, a library scan is triggered. Track status becomes <code>owned</code>.</li>
       </ol>
@@ -965,7 +1027,7 @@
       <p>All three fields are required. If any are empty, the Navidrome integration is silently disabled. Crate authenticates via the Subsonic API token+salt scheme.</p>
 
       <div class="callout">
-        <strong>Tip:</strong> Point both Crate's <code>CRATE_LIBRARY_PATH</code> and Navidrome's music folder to the same directory (or use a shared volume). Crate organizes files into <code>Artist/Album/Track.ext</code> which Navidrome indexes automatically.
+        <strong>Tip:</strong> Point both Crate's <code>CRATE_LIBRARY_PATH</code> and Navidrome's music folder to the same directory (or use a shared volume). Crate organizes files using the <a href="#naming-template">naming template</a>, which you can set to match an existing library convention, and Navidrome indexes them automatically.
       </div>
 
       <!-- Supported Formats -->
@@ -1094,7 +1156,8 @@
           <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>GET</code></td><td><code>/api/settings</code></td><td>Get all settings (sensitive values masked).</td></tr>
-            <tr><td><code>PUT</code></td><td><code>/api/settings</code></td><td>Update settings.</td></tr>
+            <tr><td><code>PUT</code></td><td><code>/api/settings</code></td><td>Update settings. Rejects invalid <code>naming_template</code> values.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/api/settings/naming-preview?template=</code></td><td>Render a <a href="#naming-template">naming template</a> against sample metadata. Empty = default template.</td></tr>
             <tr><td><code>GET</code></td><td><code>/api/activity?limit=&amp;offset=</code></td><td>Get activity log. Paginated.</td></tr>
             <tr><td><code>DELETE</code></td><td><code>/api/cache</code></td><td>Clear the provider cache.</td></tr>
           </tbody>
