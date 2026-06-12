@@ -408,6 +408,7 @@
         <a href="#download-flow" class="sidebar-link">Download Flow</a>
         <a href="#scoring" class="sidebar-link">Scoring System</a>
         <a href="#quality-upgrades" class="sidebar-link">Quality Upgrades</a>
+        <a href="#library-import" class="sidebar-link">Library Import</a>
         <a href="#navidrome" class="sidebar-link">Navidrome</a>
         <a href="#supported-formats" class="sidebar-link">Supported Formats</a>
       </div>
@@ -992,6 +993,26 @@
       <h3>Contributing</h3>
       <p>The Lidarr shim covers the most common endpoints. If your app needs an endpoint that isn't implemented yet, contributions are welcome &mdash; the shim is a single file at <code>internal/api/lidarr.go</code>.</p>
 
+      <!-- Library Import -->
+      <h2 id="library-import">Library Import</h2>
+
+      <p>Crate can adopt a music collection it didn't download. <strong>Settings &rarr; Library &rarr; Import Existing Library</strong> scans your library folder, reads embedded tags, and records everything as owned — making Crate a drop-in manager for an established Navidrome/media-server setup rather than a fresh-start tool.</p>
+
+      <h3>How it works</h3>
+      <ul>
+        <li><strong>Tag-based, not path-based</strong> &mdash; folder structure and file names are ignored entirely; only embedded metadata (MP3 ID3, FLAC Vorbis comments) matters. If your library plays correctly in a tag-based server like Navidrome, it will import correctly.</li>
+        <li><strong>Dry run first</strong> &mdash; the scan preview reports exactly what an import would add, claim, and skip, without writing anything.</li>
+        <li><strong>Non-destructive, always</strong> &mdash; files are never moved, renamed, or modified. Import doesn't apply the naming template to existing files.</li>
+        <li><strong>MusicBrainz tags link automatically</strong> &mdash; libraries tagged by <a href="https://picard.musicbrainz.org/">Picard</a> or beets carry MusicBrainz IDs, and those entities import under the MusicBrainz provider with their real IDs. Everything else imports under the reserved <code>local</code> provider and can be relinked to a real provider anytime (for search, cover art, or new-release watching).</li>
+        <li><strong>Wanted tracks get claimed</strong> &mdash; files matching tracks you already watch flip them to owned instead of leaving them queued for download.</li>
+        <li><strong>Quality upgrades apply</strong> &mdash; imported tracks record their real format and bitrate (parsed from the files). Import MP3s with a FLAC-first tier list and the upgrade scanner will gradually replace them, one artist per day. Files outside the library folder are never deleted, even when an upgrade replaces them.</li>
+        <li><strong>Idempotent</strong> &mdash; re-running an import skips what it already knows. Files missing artist/album/title tags are skipped and reported with reasons.</li>
+      </ul>
+
+      <div class="callout">
+        <strong>Formats:</strong> the importer reads MP3 and FLAC — the same formats Crate writes tags to. For other formats, the database schema is documented for custom importers (see <a href="#database">Database</a>).
+      </div>
+
       <!-- Navidrome -->
       <h2 id="navidrome">Navidrome Integration</h2>
 
@@ -1158,6 +1179,8 @@
             <tr><td><code>GET</code></td><td><code>/api/settings</code></td><td>Get all settings (sensitive values masked).</td></tr>
             <tr><td><code>PUT</code></td><td><code>/api/settings</code></td><td>Update settings. Rejects invalid <code>naming_template</code> values.</td></tr>
             <tr><td><code>GET</code></td><td><code>/api/settings/naming-preview?template=</code></td><td>Render a <a href="#naming-template">naming template</a> against sample metadata. Empty = default template.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/api/library/import</code></td><td>Start a <a href="#library-import">library import</a>. Body: <code>{"path": "...", "dry_run": true}</code> (both optional; path defaults to the library dir). Returns 409 if one is already running.</td></tr>
+            <tr><td><code>GET</code></td><td><code>/api/library/import</code></td><td>Import status: state, progress, and the final report.</td></tr>
             <tr><td><code>GET</code></td><td><code>/api/activity?limit=&amp;offset=</code></td><td>Get activity log. Paginated.</td></tr>
             <tr><td><code>DELETE</code></td><td><code>/api/cache</code></td><td>Clear the provider cache.</td></tr>
           </tbody>

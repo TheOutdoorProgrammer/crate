@@ -77,7 +77,7 @@ func main() {
 
 	go dl.Run(ctx, 10*time.Second)
 
-	sched := scheduler.NewService(queries, providerMgr, actLog, cfg.ScanInterval)
+	sched := scheduler.NewService(queries, providerMgr, actLog, cfg.LibraryPath, cfg.ScanInterval)
 	go sched.Run(ctx)
 
 	srv := &http.Server{

@@ -112,6 +112,21 @@ func (q *Queries) FindArtistByProvider(provider, providerID string) (*models.Art
 	return a, nil
 }
 
+// FindArtistByNameFold matches an artist by name case-insensitively. The
+// importer uses it so an imported "radiohead" attaches to an already-watched
+// "Radiohead" instead of creating a duplicate.
+func (q *Queries) FindArtistByNameFold(name string) (*models.Artist, error) {
+	a := &models.Artist{}
+	err := q.db.QueryRow(
+		`SELECT id, name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, created_at, updated_at
+		 FROM artists WHERE LOWER(name) = LOWER(?) LIMIT 1`, name,
+	).Scan(&a.ID, &a.Name, &a.Provider, &a.ProviderID, &a.ImageURL, &a.Status, &a.WatchNewReleases, &a.WatchNewReleasesSince, &a.CreatedAt, &a.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
 func (q *Queries) ListWatchedArtists() ([]models.Artist, error) {
 	rows, err := q.db.Query(
 		`SELECT id, name, provider, provider_id, image_url, status, watch_new_releases, watch_new_releases_since, created_at, updated_at
@@ -223,6 +238,22 @@ func (q *Queries) FindAlbumByProvider(provider, providerID string) (*models.Albu
 	return a, nil
 }
 
+// FindAlbumByArtistTitleFold matches an album under an artist by title,
+// case-insensitively. The importer uses it so imported files attach to an
+// already-watched album instead of creating a duplicate.
+func (q *Queries) FindAlbumByArtistTitleFold(artistID int64, title string) (*models.Album, error) {
+	a := &models.Album{}
+	err := q.db.QueryRow(
+		`SELECT id, artist_id, title, year, provider, provider_id, cover_url, record_type, status, created_at, updated_at
+		 FROM albums WHERE artist_id = ? AND LOWER(title) = LOWER(?) LIMIT 1`, artistID, title,
+	).Scan(&a.ID, &a.ArtistID, &a.Title, &a.Year, &a.Provider, &a.ProviderID, &a.CoverURL, &a.RecordType, &a.Status,
+		&a.CreatedAt, &a.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
 func (q *Queries) DeleteAlbum(id int64) error {
 	_, err := q.db.Exec(`DELETE FROM albums WHERE id = ?`, id)
 	return err
@@ -248,6 +279,53 @@ func (q *Queries) CreateTrack(t *models.Track) error {
 	}
 	t.ID, _ = result.LastInsertId()
 	return nil
+}
+
+// CreateImportedTrack inserts a track the importer found on disk: already
+// owned, with its file path and audio quality recorded.
+func (q *Queries) CreateImportedTrack(t *models.Track) error {
+	ts := now()
+	result, err := q.db.Exec(
+		`INSERT INTO tracks (album_id, title, track_number, disc_number, duration_ms, provider, provider_id,
+		                     status, file_path, download_format, download_bitrate, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.AlbumID, t.Title, t.TrackNumber, t.DiscNumber, t.DurationMs, t.Provider, t.ProviderID,
+		t.Status, t.FilePath, t.DownloadFormat, t.DownloadBitrate, ts, ts,
+	)
+	if err != nil {
+		return err
+	}
+	t.ID, _ = result.LastInsertId()
+	return nil
+}
+
+// ClaimTrackFile marks an existing track as owned by a file found on disk —
+// e.g. a wanted track the user already has. Duration is only filled in when
+// the row doesn't have one from its provider.
+func (q *Queries) ClaimTrackFile(id int64, filePath, format string, bitrate, durationMs int) error {
+	_, err := q.db.Exec(
+		`UPDATE tracks SET status = 'owned', file_path = ?, download_format = ?, download_bitrate = ?,
+		        duration_ms = CASE WHEN duration_ms > 0 THEN duration_ms ELSE ? END, updated_at = ?
+		 WHERE id = ?`,
+		filePath, format, bitrate, durationMs, now(), id)
+	return err
+}
+
+// FindTrackByAlbumTitleFold matches a track in an album by title,
+// case-insensitively, used by the importer to claim watched-but-wanted tracks.
+func (q *Queries) FindTrackByAlbumTitleFold(albumID int64, title string) (*models.Track, error) {
+	t := &models.Track{}
+	err := q.db.QueryRow(
+		`SELECT id, album_id, title, track_number, disc_number, duration_ms, provider, provider_id,
+		        status, file_path, downloaded_from, downloaded_filename, download_format, download_bitrate, created_at, updated_at
+		 FROM tracks WHERE album_id = ? AND LOWER(title) = LOWER(?) LIMIT 1`, albumID, title,
+	).Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
+		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
+		&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 func (q *Queries) FindTrackByProvider(provider, providerID string) (*models.Track, error) {

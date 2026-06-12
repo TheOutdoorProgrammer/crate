@@ -104,7 +104,9 @@ Unique index on `(username, filename)`. Blacklisted entries are skipped by `pick
 
 ## Importing existing music
 
-To import an existing library, insert rows into `artists`, `albums`, and `tracks`. Set `status = 'owned'` on tracks and provide the `file_path`. Example:
+**Crate has a built-in importer** — Settings → Library → Import Existing Library (or `POST /api/library/import`). It reads embedded tags from MP3/FLAC files, never touches the files themselves, and supports a dry run. Entities it creates use the reserved provider name `local` with stable tag-derived IDs (`loc-…`), unless the files carry consistent MusicBrainz tags, in which case they import under `musicbrainz` with their real IDs. `local` entities can be relinked to a real provider at any time.
+
+If the built-in importer doesn't fit (unsupported formats, exotic layouts), write directly to the database: insert rows into `artists`, `albums`, and `tracks`. Set `status = 'owned'` on tracks and provide the `file_path`. Example:
 
 ```sql
 -- Insert an artist
@@ -127,7 +129,7 @@ VALUES (last_insert_rowid(), 'Airbag', 1, 1, 282000, 'musicbrainz', 'some-track-
 ```
 
 Tips:
-- If you don't have provider IDs, use any unique string (e.g. a hash of artist+album+track). The IDs are only used for deduplication and live provider lookups.
+- If you don't have provider IDs, use the provider name `local` with any unique string as the ID (e.g. a hash of artist+album+track). `local` is reserved for exactly this: it's always treated as healthy (no orphan badge) and its entities can be relinked to a real provider later. IDs are only used for deduplication and live provider lookups.
 - Set `status = 'wanted'` on tracks you want Crate to download for you.
 - The `download_queue` table is managed by the downloader — don't insert into it directly.
 - Foreign keys cascade on delete: deleting an artist removes all their albums and tracks.
