@@ -43,11 +43,11 @@ type PostDownloadNotifier interface {
 }
 
 type Service struct {
-	queries      *db.Queries
-	slskd        *slskd.Client
-	organizer    Organizer
-	activityLog  *activity.Log
-	notifiers    []PostDownloadNotifier
+	queries     *db.Queries
+	slskd       *slskd.Client
+	organizer   Organizer
+	activityLog *activity.Log
+	notifiers   []PostDownloadNotifier
 }
 
 func NewService(queries *db.Queries, slskdClient *slskd.Client, org Organizer, actLog *activity.Log) *Service {
@@ -78,13 +78,13 @@ func (s *Service) CancelTransfer(ctx context.Context, d *models.DownloadQueueIte
 }
 
 type ProgressItem struct {
-	Username        string  `json:"username"`
-	Filename        string  `json:"filename"`
-	PercentComplete float64 `json:"percent_complete"`
-	AverageSpeed    float64 `json:"average_speed_bps"`
-	BytesTransferred int64  `json:"bytes_transferred"`
-	Size            int64   `json:"size"`
-	State           string  `json:"state"`
+	Username         string  `json:"username"`
+	Filename         string  `json:"filename"`
+	PercentComplete  float64 `json:"percent_complete"`
+	AverageSpeed     float64 `json:"average_speed_bps"`
+	BytesTransferred int64   `json:"bytes_transferred"`
+	Size             int64   `json:"size"`
+	State            string  `json:"state"`
 }
 
 func (s *Service) GetProgress(ctx context.Context) ([]ProgressItem, error) {
@@ -505,19 +505,20 @@ func (s *Service) logActivity(action, entityType string, entityID int64, details
 
 // ManualSearchResult is a scored slskd result returned to the frontend.
 type ManualSearchResult struct {
-	Username       string `json:"username"`
-	Filename       string `json:"filename"`
-	Size           int64  `json:"size"`
-	BitRate        int    `json:"bit_rate"`
-	SampleRate     int    `json:"sample_rate"`
-	BitDepth       int    `json:"bit_depth"`
-	Duration       int    `json:"duration"`
-	Format         string `json:"format"`
-	Score          int    `json:"score"`
-	FreeSlot       bool   `json:"free_slot"`
-	QueueLength    int    `json:"queue_length"`
-	Blacklisted    bool   `json:"blacklisted"`
-	NegativeMatch  bool   `json:"negative_match"`
+	Username      string `json:"username"`
+	Filename      string `json:"filename"`
+	Size          int64  `json:"size"`
+	BitRate       int    `json:"bit_rate"`
+	SampleRate    int    `json:"sample_rate"`
+	BitDepth      int    `json:"bit_depth"`
+	Duration      int    `json:"duration"`
+	Format        string `json:"format"`
+	Score         int    `json:"score"`
+	FreeSlot      bool   `json:"free_slot"`
+	QueueLength   int    `json:"queue_length"`
+	Blacklisted   bool   `json:"blacklisted"`
+	NegativeMatch bool   `json:"negative_match"`
+	Locked        bool   `json:"locked"`
 }
 
 // ManualSearch runs a slskd search for a track and returns all scored results.
@@ -560,6 +561,7 @@ func (s *Service) PollManualSearch(ctx context.Context, trackID int64, searchID 
 
 	cfg := s.getScoringConfig()
 	cfg.fallbackEnabled = true
+	cfg.includeAll = true // manual search surfaces every slskd result; the user picks
 	candidates := scoreCandidates(search.Responses, track, nil, cfg)
 
 	return &ManualSearchResponse{
@@ -602,6 +604,7 @@ func formatCandidates(candidates []candidate, q *db.Queries, negativeKeywords []
 			QueueLength:   c.queueLength,
 			Blacklisted:   q.IsBlacklisted(c.username, c.file.Filename),
 			NegativeMatch: matchesNegativeKeyword(strings.ToLower(c.file.Filename), negativeKeywords),
+			Locked:        c.file.IsLocked,
 		})
 	}
 	return results
@@ -653,41 +656,47 @@ func scoreCandidates(results []slskd.SearchResult, track *models.Track, ac avail
 			continue
 		}
 		for _, f := range result.Files {
-			if f.IsLocked {
+			if f.IsLocked && !cfg.includeAll {
 				continue
 			}
 			if ac != nil && ac.IsBlacklisted(result.Username, f.Filename) {
 				continue
 			}
 			nameLower := strings.ToLower(f.Filename)
-			if !strings.Contains(nameLower, titleLower) {
-				continue
-			}
-			if cfg.requireArtist && !strings.Contains(nameLower, artistLower) {
-				continue
-			}
-			if cfg.excludeNegative && matchesNegativeKeyword(nameLower, cfg.negativeKeywords) {
-				continue
+			// Manual search (includeAll) returns everything slskd found and lets the
+			// user pick; the title/artist/negative filters below are auto-download
+			// guards that must not silently drop results in the manual flow.
+			if !cfg.includeAll {
+				if !strings.Contains(nameLower, titleLower) {
+					continue
+				}
+				if cfg.requireArtist && !strings.Contains(nameLower, artistLower) {
+					continue
+				}
+				if cfg.excludeNegative && matchesNegativeKeyword(nameLower, cfg.negativeKeywords) {
+					continue
+				}
 			}
 
 			ext := strings.ToLower(filepath.Ext(f.Filename))
 			if ext == "" {
 				ext = inferExt(nameLower)
-				if ext == "" {
+			}
+			if ext == "" || !supportedExts[ext] {
+				// Unknown/unsupported formats can't be quality-scored for an
+				// unattended download, but manual search still surfaces them.
+				if !cfg.includeAll {
 					continue
 				}
 			}
-			if !supportedExts[ext] {
-				continue
-			}
 
 			qualityScore, allowed := tierBasedScore(ext, f.BitRate, cfg)
-			if !allowed {
+			if !allowed && !cfg.includeAll {
 				continue
 			}
 			score := qualityScore
 			// Keep artist bonus below the tier gap (25) so quality always dominates.
-			if strings.Contains(nameLower, artistLower) {
+			if artistLower != "" && strings.Contains(nameLower, artistLower) {
 				score += 20
 			}
 			freeSlotBonus := 0
@@ -786,6 +795,9 @@ type scoringConfig struct {
 	negativeKeywords []string
 	excludeNegative  bool
 	requireArtist    bool
+	// includeAll disables the title/artist/format filters so manual search can
+	// surface every file slskd returned (still scored and annotated, never dropped).
+	includeAll bool
 }
 
 func pickBestFile(results []slskd.SearchResult, track *models.Track, ac availabilityChecker, cfg scoringConfig) *candidate {

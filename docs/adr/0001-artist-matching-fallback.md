@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-06-08), revised (2026-06-08)
+Accepted (2026-06-08), revised (2026-06-08). Manual-search filtering later removed — see [ADR-0003](0003-manual-search-no-filter.md) (2026-06-13).
 
 ## Context
 
@@ -20,12 +20,12 @@ The artist match was intentionally kept as a bonus rather than a hard filter to 
 
 **Auto-downloads** (`pickBestFile`) require both artist name and track title in the file path. No fallback. If no files match both, the download fails and the scheduler retries on the next cycle.
 
-**Manual search** (`PollManualSearch`) only requires the track title. Users see all title-matching results and choose for themselves. Since manual search now supports editable queries (ADR-0002), users can refine the search if they need to.
+**Manual search** (`PollManualSearch`) originally required the track title too — users saw all title-matching results and chose for themselves. This filter was later removed entirely (see [ADR-0003](0003-manual-search-no-filter.md)): because manual search supports editable queries (ADR-0002), filtering by the *original* track title silently dropped every result whenever the user changed the query. Manual search now returns every file slskd found, scored and annotated.
 
 The flat-library concern that originally motivated the bonus-only approach is no longer relevant for auto-downloads — downloading the wrong song is always worse than waiting. For manual search, the user is in control and can see what they're picking.
 
 ## Consequences
 
 - Auto-downloads will never grab wrong-artist files, even for flat libraries. If a user's only source is a flat library, the auto-download will fail and they can use manual search to find and download it.
-- Manual search is lenient — shows everything matching the title, scored with artist as a +20 bonus for ranking.
+- Manual search is lenient — it now shows *every* file slskd returned (no title/artist/format filter; see [ADR-0003](0003-manual-search-no-filter.md)), scored with artist as a +20 bonus for ranking, with blacklisted/locked/negative sources annotated rather than dropped.
 - The scheduler retries failed downloads on its next cycle, so transient unavailability of artist-matching sources resolves naturally.

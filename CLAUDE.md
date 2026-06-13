@@ -84,7 +84,7 @@ For external providers: `CRATE_PROVIDERS=spotify:external:192.168.1.10:50053`
 Manual search is async — the frontend starts a search, then polls for results as peers respond. See [ADR-0002](docs/adr/0002-async-manual-search.md).
 
 1. `POST /api/tracks/{id}/search` → `{search_id, track_id}` — starts slskd search, returns immediately
-2. `GET /api/tracks/{id}/search/{searchId}` → `{results: [...], is_complete: bool, file_count: int}` — poll for scored results
+2. `GET /api/tracks/{id}/search/{searchId}` → `{results: [...], is_complete: bool, file_count: int}` — poll for scored results. Results are **unfiltered** (every slskd file — see [ADR-0003](docs/adr/0003-manual-search-no-filter.md)); each carries `score` plus `blacklisted`/`locked`/`negative_match` annotation flags.
 3. `DELETE /api/tracks/{id}/search/{searchId}` — cleanup when done
 
 Frontend polls every 2s, shows results as they arrive with a spinner until `is_complete`. Cleanup runs on unmount and when the user closes the search panel.
@@ -100,7 +100,7 @@ Frontend polls every 2s, shows results as they arrive with a spinner until `is_c
 All file selection goes through `scoreCandidates()` in `internal/services/downloader/service.go`. Score components:
 
 - **Quality (0-100)**: tier-based from user's priority list. Tier 0 = 100, Tier 1 = 75, Tier 2 = 50, etc. (min 25, gap of 25 per tier). If no tiers configured, uses fallback scoring. Fallback scores are capped below the lowest tier.
-- **Artist matching**: auto-downloads require both artist name and title in the file path — no fallback. Manual search only requires title (artist is a +20 bonus for ranking). See [ADR-0001](docs/adr/0001-artist-matching-fallback.md).
+- **Artist matching**: auto-downloads require both artist name and title in the file path — no fallback. Manual search applies **no** content filter and returns every slskd result for the user to pick (artist is only a +20 ranking bonus). See [ADR-0001](docs/adr/0001-artist-matching-fallback.md) and [ADR-0003](docs/adr/0003-manual-search-no-filter.md).
 - **Artist bonus (+20)**: in manual search results, artist name in filename adds +20. Kept below the tier gap (25) so quality always dominates between tiers.
 - **Free slot bonus (+10)**: if user has a free upload slot (instant start).
 - **Queue score (0-15)**: `15 / (1 + queueLength)`. Empty queue = 15, decays toward 0.
@@ -226,8 +226,9 @@ Design decisions with non-obvious trade-offs are documented as ADRs in `docs/adr
 
 | ADR | Area | Decision |
 |-----|------|----------|
-| [0001](docs/adr/0001-artist-matching-fallback.md) | Downloader | Auto-downloads require artist+title; manual search requires title only |
+| [0001](docs/adr/0001-artist-matching-fallback.md) | Downloader | Auto-downloads require artist+title (manual-search filtering since removed — see 0003) |
 | [0002](docs/adr/0002-async-manual-search.md) | API/Frontend | Async manual search with frontend polling instead of blocking 30s request |
+| [0003](docs/adr/0003-manual-search-no-filter.md) | Downloader | Manual search returns every slskd result (scored + annotated, never filtered) |
 
 When making a decision that involves a meaningful trade-off (especially "we tried X but chose Y because Z"), add a new ADR.
 

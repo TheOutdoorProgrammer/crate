@@ -75,7 +75,7 @@ Open `http://localhost:6969`.
 - **Shadow banning** -- users who go offline mid-transfer or whose queued downloads stall are temporarily blocked (configurable duration, default 60min). Different from permanent file blacklists -- shadow bans expire automatically.
 - **State-aware stale detection** -- detects stalled downloads with timeouts tuned to the transfer state: actively transferring (5min), queued/waiting for a slot (30min), or requested (10min). Queued stalls trigger shadow bans; active transfer stalls blacklist the specific file.
 - **Blocked sources management** -- view and remove blacklisted files and shadow-banned users from the Settings UI
-- **Manual search** -- browse all slskd results for a track, see scores/format/queue info, and pick which one to download
+- **Manual search** -- browse every slskd result for a track, see scores/format/queue info (blacklisted and locked sources shown but dimmed), and pick which one to download
 - **Quality tiers** -- configure priority-ordered quality tiers (e.g. FLAC > MP3 320 > MP3 256) with an optional fallback toggle to reject files outside your configured tiers. Scheduler scans one artist per day and re-queues tracks that can be upgraded.
 - **Negative keywords** -- skip files matching configurable keywords (e.g. acapella, instrumental) during auto-download. Manual search still shows them so you can override when needed.
 - **Import existing library** -- tag-based scan of your on-disk collection with dry-run preview; MusicBrainz-tagged files (Picard/beets) link to their real provider IDs automatically
@@ -216,5 +216,6 @@ Design decisions with meaningful trade-offs are documented as ADRs in [`docs/adr
 
 | ADR | Decision |
 |-----|----------|
-| [0001](docs/adr/0001-artist-matching-fallback.md) | Auto-downloads require artist+title match; manual search requires title only |
+| [0001](docs/adr/0001-artist-matching-fallback.md) | Auto-downloads require artist+title match (manual-search filtering since removed — see 0003) |
 | [0002](docs/adr/0002-async-manual-search.md) | Async manual search with frontend polling instead of blocking 30s request |
+| [0003](docs/adr/0003-manual-search-no-filter.md) | Manual search returns every slskd result (scored + annotated, never filtered) |

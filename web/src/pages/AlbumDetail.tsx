@@ -441,32 +441,42 @@ export default function AlbumDetail() {
                   </div>
                   {isManualOpen && (
                     <div className="bg-zinc-900/50 border-b border-zinc-800/50 px-3 py-2 animate-fade-in">
-                      {manualQuery && (
-                        <form
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            if (manualSearchTrackId && manualQuery.trim()) {
-                              runSearch(manualSearchTrackId, manualQuery.trim());
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          if (manualSearchTrackId && manualQuery.trim()) {
+                            runSearch(manualSearchTrackId, manualQuery.trim());
+                          }
+                        }}
+                        className="flex gap-1.5 mb-2"
+                      >
+                        <input
+                          type="text"
+                          value={manualQuery}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setManualQuery(v);
+                            // Emptying the box resets to a clean slate so the user can
+                            // type something completely different without the stale
+                            // "No results found" from the previous search lingering.
+                            if (v.trim() === '') {
+                              setManualResults([]);
+                              setManualSearchComplete(false);
+                              setManualFileCount(0);
                             }
                           }}
-                          className="flex gap-1.5 mb-2"
+                          placeholder="Search Soulseek..."
+                          className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+                          disabled={manualSearching}
+                        />
+                        <button
+                          type="submit"
+                          disabled={manualSearching || !manualQuery.trim()}
+                          className="px-2 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 rounded text-xs text-zinc-300 transition-colors shrink-0"
                         >
-                          <input
-                            type="text"
-                            value={manualQuery}
-                            onChange={(e) => setManualQuery(e.target.value)}
-                            className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500"
-                            disabled={manualSearching}
-                          />
-                          <button
-                            type="submit"
-                            disabled={manualSearching || !manualQuery.trim()}
-                            className="px-2 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 rounded text-xs text-zinc-300 transition-colors shrink-0"
-                          >
-                            Re-search
-                          </button>
-                        </form>
-                      )}
+                          Re-search
+                        </button>
+                      </form>
                       {manualSearching && manualResults.length === 0 && (
                         <div className="flex items-center gap-2 py-3 justify-center">
                           <div className="w-4 h-4 border-2 border-zinc-600 border-t-zinc-300 rounded-full animate-spin" />
@@ -485,10 +495,10 @@ export default function AlbumDetail() {
                           {manualResults.map((r, i) => (
                             <button
                               key={`${r.username}-${i}`}
-                              onClick={() => !r.blacklisted && manualDownload.mutate(r)}
-                              disabled={r.blacklisted || manualDownload.isPending}
+                              onClick={() => !r.blacklisted && !r.locked && manualDownload.mutate(r)}
+                              disabled={r.blacklisted || r.locked || manualDownload.isPending}
                               className={`w-full text-left rounded-lg px-2.5 py-2 transition-colors ${
-                                r.blacklisted
+                                r.blacklisted || r.locked
                                   ? 'opacity-40 cursor-not-allowed bg-zinc-800/30'
                                   : r.negative_match
                                   ? 'opacity-60 bg-zinc-800/30 active:bg-zinc-700'
@@ -505,6 +515,7 @@ export default function AlbumDetail() {
                                     {r.free_slot && ' · free slot'}
                                     {r.queue_length > 0 && ` · ${r.queue_length} queued`}
                                     {r.blacklisted && ' · blacklisted'}
+                                    {r.locked && ' · locked'}
                                     {r.negative_match && ' · negative keyword'}
                                   </p>
                                 </div>

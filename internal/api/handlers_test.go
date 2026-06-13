@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ type testEnv struct {
 	server      *api.Server
 	queries     *db.Queries
 	activityLog *activity.Log
-	fakeSlskd   *httptest.Server
+	fakeSlskd   *fakeSlskdServer
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -221,7 +222,49 @@ func startFakeProvider(t *testing.T) string {
 
 // --- Fake slskd API ---
 
-func newFakeSlskd() *httptest.Server {
+// fakeSlskdServer stands in for slskd. Its search response is swappable per-test
+// via setSearchResponse so a test can control exactly what slskd "returns" (e.g.
+// files whose names don't match the track title).
+type fakeSlskdServer struct {
+	*httptest.Server
+	mu   sync.Mutex
+	resp slskd.SearchResponse
+}
+
+func (f *fakeSlskdServer) setSearchResponse(resp slskd.SearchResponse) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resp = resp
+}
+
+func (f *fakeSlskdServer) searchResponse() slskd.SearchResponse {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.resp
+}
+
+func newFakeSlskd() *fakeSlskdServer {
+	f := &fakeSlskdServer{
+		resp: slskd.SearchResponse{
+			ID: "search-1", IsComplete: true,
+			Responses: []slskd.SearchResult{
+				{
+					Username:          "user1",
+					HasFreeUploadSlot: true,
+					Files: []slskd.SearchFile{
+						{Filename: "Music/Test Artist - Track A1.flac", Size: 30000000, BitRate: 0},
+						{Filename: "Music/Test Artist - Track A1.mp3", Size: 8000000, BitRate: 320},
+					},
+				},
+				{
+					Username: "user2",
+					Files: []slskd.SearchFile{
+						{Filename: "Music/Test Artist - Track A1.mp3", Size: 7000000, BitRate: 256},
+					},
+				},
+			},
+		},
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v0/transfers/downloads/", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(slskd.EnqueueResponse{
@@ -231,36 +274,18 @@ func newFakeSlskd() *httptest.Server {
 	mux.HandleFunc("/api/v0/transfers/downloads", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode([]slskd.UserDownloads{})
 	})
-	searchResp := slskd.SearchResponse{
-		ID: "search-1", IsComplete: true,
-		Responses: []slskd.SearchResult{
-			{
-				Username:          "user1",
-				HasFreeUploadSlot: true,
-				Files: []slskd.SearchFile{
-					{Filename: "Music/Test Artist - Track A1.flac", Size: 30000000, BitRate: 0},
-					{Filename: "Music/Test Artist - Track A1.mp3", Size: 8000000, BitRate: 320},
-				},
-			},
-			{
-				Username: "user2",
-				Files: []slskd.SearchFile{
-					{Filename: "Music/Test Artist - Track A1.mp3", Size: 7000000, BitRate: 256},
-				},
-			},
-		},
-	}
 	mux.HandleFunc("/api/v0/searches/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "DELETE" {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		json.NewEncoder(w).Encode(searchResp)
+		json.NewEncoder(w).Encode(f.searchResponse())
 	})
 	mux.HandleFunc("/api/v0/searches", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(searchResp)
+		json.NewEncoder(w).Encode(f.searchResponse())
 	})
-	return httptest.NewServer(mux)
+	f.Server = httptest.NewServer(mux)
+	return f
 }
 
 // --- Tests ---
@@ -469,7 +494,6 @@ func TestBrowseAlbumWatchedStatus(t *testing.T) {
 func TestWatchArtistCreatesFullDiscography(t *testing.T) {
 	env := newTestEnv(t)
 	w := env.do("POST", "/api/watch/artist/1000", `{}`)
-
 
 	if w.Code != 201 {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
@@ -743,7 +767,6 @@ func TestGetArtistWithAlbumsAndTracks(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
 
-
 	artists, _ := env.queries.ListArtists()
 	w := env.do("GET", fmt.Sprintf("/api/artists/%d", artists[0].ID), "")
 
@@ -773,7 +796,6 @@ func TestGetArtistNotFound(t *testing.T) {
 func TestGetAlbumWithTracks(t *testing.T) {
 	env := newTestEnv(t)
 	env.do("POST", "/api/watch/artist/1000", `{}`)
-
 
 	artists, _ := env.queries.ListArtists()
 	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
@@ -1581,6 +1603,92 @@ func TestManualSearchTrackEmptyBodyUsesDefault(t *testing.T) {
 
 	// Cleanup
 	searchID := startResp["search_id"].(string)
+	env.do("DELETE", fmt.Sprintf("/api/tracks/%d/search/%s", tracks[0].ID, searchID), "")
+}
+
+// TestManualSearchReturnsUnfilteredResults exercises the full manual-search path
+// (handler -> PollManualSearch -> scoreCandidates/formatCandidates) and proves the
+// fix from ADR-0003: every file slskd returns is surfaced — even when none of them
+// match the track title — and blacklisted/locked/negative sources are annotated
+// rather than dropped. Before the fix, the track-title filter dropped all of these
+// and the user always saw "No results found".
+func TestManualSearchReturnsUnfilteredResults(t *testing.T) {
+	env := newTestEnv(t)
+	env.do("POST", "/api/watch/artist/1000", `{}`)
+
+	artists, _ := env.queries.ListArtists()
+	albums, _ := env.queries.ListAlbumsByArtist(artists[0].ID)
+	tracks, _ := env.queries.ListTracksByAlbum(albums[0].ID)
+
+	// Configure a negative keyword and blacklist one source so we can assert those
+	// are annotated, not removed.
+	env.queries.SetSetting("negative_keywords", `["acapella"]`)
+	env.queries.BlacklistFile("baduser", "Music/Eminem - Stan.mp3", "prior failure")
+
+	// slskd returns four files, NONE of which contain the track title "Track A1".
+	env.fakeSlskd.setSearchResponse(slskd.SearchResponse{
+		ID: "search-unfiltered", IsComplete: true, FileCount: 4,
+		Responses: []slskd.SearchResult{
+			{
+				Username:          "user1",
+				HasFreeUploadSlot: true,
+				Files: []slskd.SearchFile{
+					{Filename: "Music/Eminem - Lose Yourself.flac", Size: 30000000},
+					{Filename: "Music/Eminem - Mockingbird (Acapella).mp3", Size: 8000000, BitRate: 320},
+					{Filename: "Music/Eminem - Rap God.flac", Size: 30000000, IsLocked: true},
+				},
+			},
+			{
+				Username: "baduser",
+				Files: []slskd.SearchFile{
+					{Filename: "Music/Eminem - Stan.mp3", Size: 7000000, BitRate: 256},
+				},
+			},
+		},
+	})
+
+	// Custom query unrelated to the track — the exact user repro ("eminem" on a
+	// different track).
+	w := env.do("POST", fmt.Sprintf("/api/tracks/%d/search", tracks[0].ID), `{"query":"eminem"}`)
+	if w.Code != 200 {
+		t.Fatalf("start search: %d %s", w.Code, w.Body.String())
+	}
+	searchID := decode[map[string]any](t, w)["search_id"].(string)
+
+	w = env.do("GET", fmt.Sprintf("/api/tracks/%d/search/%s", tracks[0].ID, searchID), "")
+	if w.Code != 200 {
+		t.Fatalf("poll search: %d %s", w.Code, w.Body.String())
+	}
+	resp := decode[downloader.ManualSearchResponse](t, w)
+
+	if len(resp.Results) != 4 {
+		t.Fatalf("expected all 4 slskd files returned unfiltered, got %d", len(resp.Results))
+	}
+
+	var sawLocked, sawBlacklisted, sawNegative bool
+	for _, r := range resp.Results {
+		switch {
+		case strings.Contains(r.Filename, "Rap God"):
+			if !r.Locked {
+				t.Error("expected locked file annotated locked=true")
+			}
+			sawLocked = true
+		case r.Username == "baduser":
+			if !r.Blacklisted {
+				t.Error("expected baduser source annotated blacklisted=true")
+			}
+			sawBlacklisted = true
+		case strings.Contains(strings.ToLower(r.Filename), "acapella"):
+			if !r.NegativeMatch {
+				t.Error("expected acapella file annotated negative_match=true")
+			}
+			sawNegative = true
+		}
+	}
+	if !sawLocked || !sawBlacklisted || !sawNegative {
+		t.Errorf("missing annotated results: locked=%v blacklisted=%v negative=%v", sawLocked, sawBlacklisted, sawNegative)
+	}
+
 	env.do("DELETE", fmt.Sprintf("/api/tracks/%d/search/%s", tracks[0].ID, searchID), "")
 }
 

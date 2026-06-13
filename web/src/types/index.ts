@@ -170,6 +170,7 @@ export interface ManualSearchResult {
   queue_length: number;
   blacklisted: boolean;
   negative_match: boolean;
+  locked: boolean;
 }
 
 export interface ManualSearchResponse {

@@ -38,7 +38,7 @@ func TestRetryDelayTotalUnder2Hours(t *testing.T) {
 }
 
 type fakeAvailability struct {
-	blocked   map[string]bool
+	blocked    map[string]bool
 	cooledDown map[string]bool
 }
 
@@ -167,9 +167,9 @@ func TestIsUpgradeable(t *testing.T) {
 	br320 := 320
 
 	tests := []struct {
-		name   string
-		track  *models.Track
-		want   bool
+		name  string
+		track *models.Track
+		want  bool
 	}{
 		{"mp3 is upgradeable to flac", &models.Track{DownloadFormat: &mp3, DownloadBitrate: &br320}, true},
 		{"flac is not upgradeable", &models.Track{DownloadFormat: &flac}, false},
@@ -753,5 +753,87 @@ func TestInferExt(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("inferExt(%q) = %q, want %q", tt.name, got, tt.want)
 		}
+	}
+}
+
+func TestScoreCandidatesIncludeAllKeepsUnrelatedResults(t *testing.T) {
+	// Manual search sets includeAll: every file slskd returns must survive, even
+	// when the user typed a custom query unrelated to the track's title/artist.
+	// Regression for the "manual search always says No results found" bug, where a
+	// custom query (e.g. "eminem") on a different track dropped every file.
+	results := []slskd.SearchResult{
+		{
+			Username:          "user1",
+			HasFreeUploadSlot: true,
+			Files: []slskd.SearchFile{
+				{Filename: "music/Eminem - Lose Yourself.flac", Size: 30000000},
+				{Filename: "music/Eminem - Stan.mp3", Size: 8000000, BitRate: 320},
+			},
+		},
+	}
+	track := &models.Track{Title: "Bohemian Rhapsody", ArtistName: "Queen"}
+	cfg := scoringConfig{fallbackEnabled: true, includeAll: true}
+	scored := scoreCandidates(results, track, nil, cfg)
+	if len(scored) != 2 {
+		t.Fatalf("includeAll should keep all files regardless of title, got %d", len(scored))
+	}
+}
+
+func TestScoreCandidatesDropsUnrelatedResultsWithoutIncludeAll(t *testing.T) {
+	// The auto-download path (no includeAll) must still drop files whose name
+	// doesn't contain the track title, so unattended downloads stay correct.
+	results := []slskd.SearchResult{
+		{
+			Username: "user1",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Eminem - Lose Yourself.flac", Size: 30000000},
+			},
+		},
+	}
+	track := &models.Track{Title: "Bohemian Rhapsody", ArtistName: "Queen"}
+	scored := scoreCandidates(results, track, nil, defaultCfg)
+	if len(scored) != 0 {
+		t.Fatalf("auto path should drop title-mismatched files, got %d", len(scored))
+	}
+}
+
+func TestScoreCandidatesIncludeAllKeepsLocked(t *testing.T) {
+	// Locked files can't be downloaded, but manual search surfaces them (annotated)
+	// rather than dropping them, so the user can see they exist.
+	results := []slskd.SearchResult{
+		{
+			Username: "user1",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Queen - Bohemian Rhapsody.flac", Size: 30000000, IsLocked: true},
+			},
+		},
+	}
+	track := &models.Track{Title: "Bohemian Rhapsody", ArtistName: "Queen"}
+	cfg := scoringConfig{fallbackEnabled: true, includeAll: true}
+	scored := scoreCandidates(results, track, nil, cfg)
+	if len(scored) != 1 {
+		t.Fatalf("includeAll should keep locked files, got %d", len(scored))
+	}
+	if !scored[0].file.IsLocked {
+		t.Error("expected the surfaced file to be the locked one")
+	}
+}
+
+func TestScoreCandidatesIncludeAllKeepsUnsupportedFormat(t *testing.T) {
+	// A format Crate can't tag/score for auto-download should still appear in
+	// manual results rather than vanishing.
+	results := []slskd.SearchResult{
+		{
+			Username: "user1",
+			Files: []slskd.SearchFile{
+				{Filename: "music/Queen - Bohemian Rhapsody.aiff", Size: 30000000},
+			},
+		},
+	}
+	track := &models.Track{Title: "Bohemian Rhapsody", ArtistName: "Queen"}
+	cfg := scoringConfig{fallbackEnabled: true, includeAll: true}
+	scored := scoreCandidates(results, track, nil, cfg)
+	if len(scored) != 1 {
+		t.Fatalf("includeAll should keep unsupported-format files, got %d", len(scored))
 	}
 }
