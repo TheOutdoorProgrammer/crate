@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/bogem/id3v2/v2 v2.1.4
+	github.com/coder/websocket v1.8.15
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/go-chi/cors v1.2.2
 	github.com/go-flac/flacvorbis v0.2.0

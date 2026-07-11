@@ -7,6 +7,8 @@
 package library
 
 import (
+	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -27,4 +29,23 @@ func Contains(libraryDir, abs string) bool {
 	rel, err := filepath.Rel(filepath.Clean(libraryDir), filepath.Clean(abs))
 	return err == nil && rel != "." && rel != ".." &&
 		!strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// DeleteFile removes a stored track file, but only when it resolves to a
+// location strictly inside libraryDir — imported files outside the library are
+// left untouched. A blank path is a no-op.
+func DeleteFile(libraryDir, filePath string) {
+	if filePath == "" || libraryDir == "" {
+		return
+	}
+	cleaned := ResolvePath(libraryDir, filePath)
+	if !Contains(libraryDir, cleaned) {
+		slog.Error("library: refusing to delete path outside library", "path", cleaned)
+		return
+	}
+	if err := os.Remove(cleaned); err != nil { // #nosec G703 -- cleaned is confined to libraryDir by Contains above
+		slog.Error("library: failed to delete file", "path", cleaned, "error", err)
+	} else {
+		slog.Info("library: deleted file", "path", cleaned)
+	}
 }

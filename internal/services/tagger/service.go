@@ -22,7 +22,6 @@ type TrackMeta struct {
 	DiscNumber  int
 	Year        int
 	CoverURL    string
-	CrateID     int64
 }
 
 func Tag(filePath string, meta TrackMeta) error {
@@ -41,7 +40,10 @@ func Tag(filePath string, meta TrackMeta) error {
 }
 
 func tagMP3(filePath string, meta TrackMeta) error {
-	tag, err := id3v2.Open(filePath, id3v2.Options{Parse: false})
+	// Parse existing frames so foreign tags (UFID, TSRC, TXXX, ReplayGain, …)
+	// survive; we only replace Crate's own frames below. Opening with
+	// Parse:false would drop every frame not re-written here.
+	tag, err := id3v2.Open(filePath, id3v2.Options{Parse: true})
 	if err != nil {
 		return fmt.Errorf("tagger: open mp3: %w", err)
 	}
@@ -53,24 +55,23 @@ func tagMP3(filePath string, meta TrackMeta) error {
 	tag.SetAlbum(meta.Album)
 	tag.SetYear(fmt.Sprintf("%d", meta.Year))
 
+	// SetTitle/SetArtist/etc. replace, but AddTextFrame/AddAttachedPicture
+	// append — so clear Crate's track/disc/cover frames first, or a re-tag of
+	// an already-tagged file (Soulseek files arrive tagged) accumulates dupes.
+	trackID := tag.CommonID("Track number/Position in set")
+	discID := tag.CommonID("Part of a set")
+	tag.DeleteFrames(trackID)
+	tag.DeleteFrames(discID)
 	if meta.TrackNumber > 0 {
-		tag.AddTextFrame(tag.CommonID("Track number/Position in set"), id3v2.EncodingUTF8, fmt.Sprintf("%d", meta.TrackNumber))
+		tag.AddTextFrame(trackID, id3v2.EncodingUTF8, fmt.Sprintf("%d", meta.TrackNumber))
 	}
 	if meta.DiscNumber > 0 {
-		tag.AddTextFrame(tag.CommonID("Part of a set"), id3v2.EncodingUTF8, fmt.Sprintf("%d", meta.DiscNumber))
-	}
-
-	if meta.CrateID > 0 {
-		tag.AddCommentFrame(id3v2.CommentFrame{
-			Encoding:    id3v2.EncodingUTF8,
-			Language:    "eng",
-			Description: "",
-			Text:        fmt.Sprintf("crate:%d", meta.CrateID),
-		})
+		tag.AddTextFrame(discID, id3v2.EncodingUTF8, fmt.Sprintf("%d", meta.DiscNumber))
 	}
 
 	if meta.CoverURL != "" {
 		if pic := fetchCover(meta.CoverURL); pic != nil {
+			tag.DeleteFrames(tag.CommonID("Attached picture"))
 			tag.AddAttachedPicture(id3v2.PictureFrame{
 				Encoding:    id3v2.EncodingUTF8,
 				MimeType:    pic.mimeType,
@@ -83,21 +84,51 @@ func tagMP3(filePath string, meta TrackMeta) error {
 	return tag.Save()
 }
 
+// crateOwnedFLACFields are the Vorbis comments Crate manages. On (re-)tag we
+// overwrite only these and preserve every other field — ReplayGain,
+// MusicBrainz, AcoustID, ISRC, etc. written by other tools such as Music
+// Assistant's analysis providers. Rebuilding a fresh comment block (the old
+// behavior) silently wiped those.
+var crateOwnedFLACFields = map[string]bool{
+	"TITLE":       true,
+	"ARTIST":      true,
+	"ALBUM":       true,
+	"TRACKNUMBER": true,
+	"DISCNUMBER":  true,
+	"DATE":        true,
+}
+
 func tagFLAC(filePath string, meta TrackMeta) error {
 	f, err := flac.ParseFile(filePath)
 	if err != nil {
 		return fmt.Errorf("tagger: open flac: %w", err)
 	}
 
+	// Start from the existing comments so foreign fields survive; only strip
+	// the fields Crate is about to rewrite. Falls back to a fresh block when
+	// the file has no (or an unparseable) Vorbis comment block.
 	cmtIdx := -1
+	cmt := flacvorbis.New()
 	for i, block := range f.Meta {
-		if block.Type == flac.VorbisComment {
-			cmtIdx = i
-			break
+		if block.Type != flac.VorbisComment {
+			continue
 		}
+		cmtIdx = i
+		if existing, perr := flacvorbis.ParseFromMetaDataBlock(*block); perr == nil {
+			cmt = existing
+			kept := cmt.Comments[:0]
+			for _, c := range cmt.Comments {
+				key, _, ok := strings.Cut(c, "=")
+				if ok && crateOwnedFLACFields[strings.ToUpper(strings.TrimSpace(key))] {
+					continue
+				}
+				kept = append(kept, c)
+			}
+			cmt.Comments = kept
+		}
+		break
 	}
 
-	cmt := flacvorbis.New()
 	cmt.Add(flacvorbis.FIELD_TITLE, meta.Title)
 	cmt.Add(flacvorbis.FIELD_ARTIST, meta.Artist)
 	cmt.Add(flacvorbis.FIELD_ALBUM, meta.Album)
@@ -105,9 +136,6 @@ func tagFLAC(filePath string, meta TrackMeta) error {
 	cmt.Add("DISCNUMBER", fmt.Sprintf("%d", meta.DiscNumber))
 	if meta.Year > 0 {
 		cmt.Add("DATE", fmt.Sprintf("%d", meta.Year))
-	}
-	if meta.CrateID > 0 {
-		cmt.Add("COMMENT", fmt.Sprintf("crate:%d", meta.CrateID))
 	}
 
 	cmtBlock := cmt.Marshal()
@@ -152,9 +180,6 @@ func tagWAV(filePath string, meta TrackMeta) error {
 		"ITRK": fmt.Sprintf("%d", meta.TrackNumber),
 		"IKEY": fmt.Sprintf("%d", meta.DiscNumber),
 		"ICRD": fmt.Sprintf("%d", meta.Year),
-	}
-	if meta.CrateID > 0 {
-		fields["ICMT"] = fmt.Sprintf("crate:%d", meta.CrateID)
 	}
 	info := buildListInfo(fields)
 

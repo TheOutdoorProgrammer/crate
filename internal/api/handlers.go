@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +18,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/models"
 	"github.com/TheOutdoorProgrammer/crate/internal/naming"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/reject"
 	pb "github.com/TheOutdoorProgrammer/crate/proto/provider"
 )
 
@@ -854,14 +853,10 @@ func (s *Server) handleUnwatchTrack(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("delete") == "true" {
 		track, err := s.queries.GetTrackWithMeta(id)
 		if err == nil && track.Status == models.TrackStatusOwned {
-			deleteTrackFile(s.libraryDir, track)
-			s.bgWork.Add(1)
-			go func() {
-				defer s.bgWork.Done()
-				for _, n := range s.downloader.Notifiers() {
-					n.TriggerScan(context.Background())
-				}
-			}()
+			if track.FilePath != nil {
+				library.DeleteFile(s.libraryDir, *track.FilePath)
+			}
+			s.triggerScanAsync()
 		}
 	}
 
@@ -1050,7 +1045,8 @@ func (s *Server) handleRelinkEntity(w http.ResponseWriter, r *http.Request) {
 // Settings
 
 var sensitiveSettings = map[string]bool{
-	"navidrome_password": true,
+	"navidrome_password":    true,
+	"music_assistant_token": true,
 }
 
 var hiddenSettings = map[string]bool{
@@ -1232,47 +1228,19 @@ func (s *Server) handleRejectTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	track, err := s.queries.GetTrackWithMeta(id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "track not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to get track")
+	switch err := s.reject.Reject(id); {
+	case errors.Is(err, reject.ErrNotFound):
+		writeError(w, http.StatusNotFound, "track not found")
 		return
-	}
-
-	if track.Status != models.TrackStatusOwned {
+	case errors.Is(err, reject.ErrNotOwned):
 		writeError(w, http.StatusBadRequest, "track is not owned")
 		return
-	}
-
-	deleteTrackFile(s.libraryDir, track)
-
-	if track.DownloadedFrom != nil && track.DownloadedFilename != nil {
-		_ = s.queries.BlacklistFile(*track.DownloadedFrom, *track.DownloadedFilename, "rejected by user")
-		slog.Info("reject: blacklisted source", "username", *track.DownloadedFrom, "filename", *track.DownloadedFilename)
-	}
-
-	if err := s.queries.RejectTrack(id); err != nil {
+	case err != nil:
 		writeError(w, http.StatusInternalServerError, "failed to reject track")
 		return
 	}
 
-	if err := s.queries.ReenqueueDownload(id); err != nil {
-		slog.Error("reject: failed to re-enqueue", "track_id", id, "error", err)
-	}
-
-	s.activityLog.Record("track_rejected", "track", id,
-		fmt.Sprintf("Rejected: %s - %s", track.ArtistName, track.Title))
-
-	s.bgWork.Add(1)
-	go func() {
-		defer s.bgWork.Done()
-		for _, n := range s.downloader.Notifiers() {
-			n.TriggerScan(context.Background())
-		}
-	}()
+	s.triggerScanAsync()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
 }
@@ -1293,24 +1261,21 @@ func (s *Server) handleRejectTrackByName(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	deleteTrackFile(s.libraryDir, track)
-
-	if track.DownloadedFrom != nil && track.DownloadedFilename != nil {
-		_ = s.queries.BlacklistFile(*track.DownloadedFrom, *track.DownloadedFilename, "rejected by user")
-	}
-
-	if err := s.queries.RejectTrack(track.ID); err != nil {
+	if err := s.reject.RejectTrack(track); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to reject track")
 		return
 	}
 
-	if err := s.queries.ReenqueueDownload(track.ID); err != nil {
-		slog.Error("reject: failed to re-enqueue", "track_id", track.ID, "error", err)
-	}
+	s.triggerScanAsync()
 
-	s.activityLog.Record("track_rejected", "track", track.ID,
-		fmt.Sprintf("Rejected: %s - %s", track.ArtistName, track.Title))
+	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
+}
 
+// Helpers
+
+// triggerScanAsync fans out a library rescan to all post-download notifiers
+// (Navidrome, Music Assistant) in the background.
+func (s *Server) triggerScanAsync() {
 	s.bgWork.Add(1)
 	go func() {
 		defer s.bgWork.Done()
@@ -1318,26 +1283,6 @@ func (s *Server) handleRejectTrackByName(w http.ResponseWriter, r *http.Request)
 			n.TriggerScan(context.Background())
 		}
 	}()
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
-}
-
-// Helpers
-
-func deleteTrackFile(libraryDir string, track *models.Track) {
-	if track.FilePath == nil || libraryDir == "" {
-		return
-	}
-	cleaned := library.ResolvePath(libraryDir, *track.FilePath)
-	if !library.Contains(libraryDir, cleaned) {
-		slog.Error("reject: path escapes library dir", "path", cleaned)
-		return
-	}
-	if err := os.Remove(cleaned); err != nil { // #nosec G703 -- cleaned is resolved and confined to libraryDir by library.Contains above
-		slog.Error("reject: failed to delete file", "path", cleaned, "error", err)
-	} else {
-		slog.Info("reject: deleted file", "path", cleaned)
-	}
 }
 
 func strPtrOrNil(s string) *string {

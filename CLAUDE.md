@@ -28,8 +28,10 @@ internal/
     scheduler/                  Background periodic jobs (new release detection, auto-queue, quality upgrades)
     importer/                   Library import: tag-based scan of existing files into the DB
     organizer/                  Moves downloaded files into library using the naming template
-    tagger/                     ID3/FLAC metadata tagging + cover art embedding
+    tagger/                     Non-destructive ID3/FLAC/WAV tagging + cover art (preserves foreign tags)
     navidrome/                  Optional Navidrome integration (triggers library scan after download)
+    musicassistant/             Optional Music Assistant integration (ws client, sync notifier, reject-playlist watcher)
+    reject/                     Shared track-reject logic (delete file, blacklist, re-queue) — used by the API and the MA watcher
 web/                            React frontend (Vite, Tailwind, React Query, React Router)
 docs/adr/                       Architecture Decision Records
 ```
@@ -65,7 +67,7 @@ For external providers: `CRATE_PROVIDERS=spotify:external:192.168.1.10:50053`
 2. User watches an artist (full discography), album, or individual track
 3. Watched items saved to SQLite with provider + provider_id
 4. Scheduler (configurable interval, default 6h) checks each watched artist's provider for new releases
-5. Downloader processes queue: search slskd → pick best file → download → organize → tag → write `crate:{track_id}` into file comment
+5. Downloader processes queue: search slskd → pick best file → download → organize → tag (non-destructive: only Crate's own fields, foreign tags preserved) → notify (Navidrome / Music Assistant rescan)
 6. Track status: `wanted` → `downloading` → `owned`
 
 ## Download Retry, Blacklist & Shadow Bans
@@ -77,7 +79,7 @@ For external providers: `CRATE_PROVIDERS=spotify:external:192.168.1.10:50053`
 - **Retry backoff**: 5m → 15m → 30m → 1h. After 4 attempts (~2h cumulative), permanently fails. Track reverts to "wanted".
 - **Blacklist is per-file-per-user**: a user can be blacklisted for one file but not others. Shadow bans are per-user (all files blocked during cooldown).
 - **API management**: `GET/DELETE /api/blacklist/{id}`, `GET/DELETE /api/cooldowns/{id}` for viewing and removing entries. Also exposed in the Settings UI under "Blocked Sources".
-- **Track rejection**: `POST /api/tracks/{id}/reject` (by Crate track ID) or `POST /api/tracks/reject` with `{"artist":"...","title":"..."}` (by name). Deletes the file from the library, blacklists the source if `downloaded_from` and `downloaded_filename` are both known, resets track to wanted, re-enqueues for download, and triggers a Navidrome library scan. Tracks downloaded before v1.11.0 won't have `downloaded_filename` — reject still works but skips the blacklist step.
+- **Track rejection**: the shared logic lives in `internal/services/reject` (`Reject(id)` / `RejectTrack(track)`) — deletes the file (via `library.DeleteFile`), blacklists the source if `downloaded_from` and `downloaded_filename` are both known, resets track to wanted, and re-enqueues for download. Callers trigger the rescan afterward. Three triggers: `POST /api/tracks/{id}/reject` (by Crate track ID), `POST /api/tracks/reject` with `{"artist":"...","title":"..."}` (by name), and the **Music Assistant reject-playlist watcher** (see Music Assistant Integration). Tracks downloaded before v1.11.0 won't have `downloaded_filename` — reject still works but skips the blacklist step.
 
 ## Manual Search (async)
 
@@ -142,7 +144,8 @@ Key invariants:
 - **Provider identity**: files with consistent MusicBrainz tags import under `musicbrainz` with real IDs — artist MBID, **release-group** ID for albums, **release-track** ID for tracks (matching the MB provider's namespace in `cmd/provider-musicbrainz`: albums are release-groups, browse tracks are release-tracks). Everything else gets `provider.LocalProvider` ("local") with stable tag-derived hash IDs (`loc-…`, never path-derived). `local` is reserved: always healthy (no orphan badge), rejected by `RegisterProvider`, never routed. Relink is the promotion path to a real provider.
 - **Reuse before create**: artists match by (provider, provider_id) then case-insensitive name; albums by provider then title under the artist; tracks by provider then title within the album. A wanted track matching an imported file is **claimed** (flips to owned with the file path) — its provider identity is never rewritten.
 - **Quality data is real**: `download_format` from the file, `download_bitrate` parsed from MP3 frame headers (Xing/VBR aware, `internal/services/importer/mp3info.go`) or 0 for FLAC (lossless convention). Without this, `IsUpgradeable` would treat every imported track as upgradeable and re-download the entire library one artist per day.
-- **file_path convention**: relative when inside the library dir, absolute otherwise. All resolution goes through `internal/library` (`ResolvePath`/`Contains`) — used by the organizer, `deleteTrackFile`, the scheduler's integrity check, and the importer. Destructive operations require `Contains` (files outside the library are never deleted).
+- **file_path convention**: relative when inside the library dir, absolute otherwise. All resolution goes through `internal/library` (`ResolvePath`/`Contains`/`DeleteFile`) — used by the organizer, reject, the scheduler's integrity check, and the importer. Destructive operations require `Contains` (files outside the library are never deleted).
+- **Recording id capture**: files carrying a MusicBrainz *recording* id (FLAC `MUSICBRAINZ_TRACKID` / MP3 `UFID`) store it in `tracks.mb_recording_id`; the importer prefers it (album-scoped) as the highest-confidence match. See "MusicBrainz recording id".
 - Dry-run runs the identical code path with writes skipped, so its counts are exact. Re-runs are idempotent. Skipped files (missing artist/album/title) are reported with reasons, capped at 100 samples.
 
 ## Navidrome Integration
@@ -152,16 +155,30 @@ Key invariants:
 - Auth uses token+salt scheme: `token = md5(password + random_salt)`, both sent as query params
 - Implemented as a `PostDownloadNotifier` interface — extensible for other integrations
 - Does nothing if settings are not configured (all three fields required)
+- **Music Assistant is a second `PostDownloadNotifier`** (see below). Both fire when configured; keeping Navidrome is free.
 
-## Crate ID Comment Tag
+## Metadata Tagging
 
-The tagger writes `crate:{track_id}` into each music file's comment metadata during the organize → tag pipeline. This embeds the Crate internal track ID in the file itself, enabling Subsonic clients (like Haystack) to bridge back to Crate by ID instead of fragile artist+title matching.
+`internal/services/tagger` writes ID3v2 (MP3), Vorbis comments (FLAC), and RIFF INFO (WAV) — title, artist, album, track, disc, year, and cover art (MP3/FLAC).
 
-- **MP3**: ID3v2 COMM frame (language: "eng", encoding: UTF-8)
-- **FLAC**: `COMMENT` vorbis comment field
-- **WAV**: `ICMT` field in LIST INFO chunk
-- When `CrateID` is 0 (should never happen for real tracks), no comment is written
-- The `TrackMeta.CrateID` field is populated from `track.ID` in the organizer
+**Non-destructive.** The tagger reads the file's existing tags and overwrites *only* Crate's own fields, preserving everything else — ReplayGain, MusicBrainz/AcoustID/ISRC identifiers, and any other foreign tags. This matters because Music Assistant's analysis providers write ReplayGain and a MusicBrainz recording id back into the same files; the old "rebuild a fresh tag block" behavior silently wiped them. FLAC seeds a comment block from the existing one minus Crate's keys; MP3 opens with `Parse:true` and `DeleteFrames` only Crate's own frames before re-adding (so pre-tagged Soulseek files don't accumulate dupes). Regression tests in `service_test.go` prove foreign tags survive a re-tag.
+
+> Historical: Crate used to write a `crate:{track_id}` comment tag so the (retired) Haystack app could bridge back by ID. Dropped — the MA reject watcher maps by file path instead.
+
+## MusicBrainz recording id
+
+The importer captures the MusicBrainz **recording** id (FLAC `MUSICBRAINZ_TRACKID` / MP3 `UFID` owner `http://musicbrainz.org`) into `tracks.mb_recording_id` (migration 010). This is the fingerprint-verified identity Music Assistant's `acoustid_lookup` provider writes — distinct from the **release-track** id Crate's `musicbrainz` provider uses (a recording is release-independent). Stored as a separate signal and used, album-scoped, as the highest-confidence importer match (`FindTrackByAlbumRecordingID`, tried before release-track and title matching). It never overrides album/release structure — a recording id can't place a track on a specific release. (Needs MA's `acoustid_lookup` `write_tags_back` option enabled for the id to land in files.)
+
+## Music Assistant Integration
+
+Optional, in `internal/services/musicassistant`. Configured via settings `music_assistant_url` + `music_assistant_token` (both required; `music_assistant_reject_playlist` optional, default `Crate Reject`). When unconfigured, `NewClient` returns nil — nothing connects, no goroutine runs. **Enabling it needs a restart** (a persistent connection can't hot-start without an idle settings-polling goroutine, which would violate "nothing runs when unconfigured").
+
+One reconnecting websocket connection (`client.go`, `coder/websocket`) to MA's `/ws` endpoint backs two features:
+
+- **Sync notifier** (`notifier.go`): implements `PostDownloadNotifier.TriggerScan` → sends `music/sync` so MA picks up new downloads. Runs *alongside* the Navidrome notifier.
+- **Reject watcher** (`rejectwatcher.go`): "mark a track bad from the MA app." MA can't add a per-item action, so the signal is a dedicated **reject playlist** — the user drops a track into it. Event-driven: MA pushes `media_item_updated` for the playlist (`object_id == library://playlist/<id>`); the watcher fetches the playlist's tracks, maps each MA filesystem track back to a Crate track by its shared library-relative path (`FindTrackByPath`), runs the shared reject, removes it from the playlist, and triggers a sync. Auto-creates the playlist if missing; reconciles on (re)connect to catch anything added while disconnected.
+
+Protocol (verified against MA 2.9.x + `music-assistant-models`): connect → server pushes `server_info` → client sends `{"command":"auth","message_id":"…","args":{"token":…}}` → `{"message_id":"…","result":…}`; events arrive as `{"event":"…","object_id":"…","data":…}`. `client.go` handles command-RPC correlation by `message_id`, partial-result merging, event dispatch, and reconnect with backoff. The MA token is redacted in the settings API (`sensitiveSettings`).
 
 ## Key concepts
 
@@ -204,6 +221,9 @@ Tests live in:
 - `internal/activity/activity_test.go` — Activity log unit tests
 - `internal/services/downloader/service_test.go` — Scoring system (tier-based, queue, cooldown filtering, balance invariants), retry delay, pickBestFile, blacklist, stale timeouts, inferExt
 - `internal/services/navidrome/client_test.go` — Navidrome scan trigger and auth tests
+- `internal/services/tagger/service_test.go` — tagging per format + non-destructive regression (foreign tags survive a re-tag)
+- `internal/services/importer/service_test.go` — library import incl. MusicBrainz recording-id capture
+- `internal/services/musicassistant/client_test.go` — URL normalization + MA-track→path mapping; `client_live_test.go` is an opt-in read-only live smoke test (gated on `MA_LIVE_URL`/`MA_LIVE_TOKEN`)
 
 The `testEnv` helper in handlers_test.go wires up real in-memory SQLite, a fake gRPC provider, fake slskd, and an in-memory activity log. Use `newTestEnv(t)` and call `env.do(method, path, body)`. The fake provider returns canned data for artist "1000" with two albums and three tracks.
 
@@ -229,6 +249,9 @@ Design decisions with non-obvious trade-offs are documented as ADRs in `docs/adr
 | [0001](docs/adr/0001-artist-matching-fallback.md) | Downloader | Auto-downloads require artist+title (manual-search filtering since removed — see 0003) |
 | [0002](docs/adr/0002-async-manual-search.md) | API/Frontend | Async manual search with frontend polling instead of blocking 30s request |
 | [0003](docs/adr/0003-manual-search-no-filter.md) | Downloader | Manual search returns every slskd result (scored + annotated, never filtered) |
+| [0004](docs/adr/0004-non-destructive-tagging.md) | Tagger | Tagger preserves foreign tags; the `crate:` comment tag was dropped |
+| [0005](docs/adr/0005-recording-id-signal.md) | Importer | MusicBrainz recording id stored as a separate signal (not resolved to release-track) |
+| [0006](docs/adr/0006-music-assistant-integration.md) | Integrations | Music Assistant added alongside Navidrome; mark-bad-from-app via an event-driven reject playlist |
 
 When making a decision that involves a meaningful trade-off (especially "we tried X but chose Y because Z"), add a new ADR.
 
@@ -236,7 +259,7 @@ When making a decision that involves a meaningful trade-off (especially "we trie
 
 - **Always add tests for new features.** Run `go test ./...` before pushing. CI gates on this.
 - **The `.dockerignore` matters.** If something works locally but fails in Docker, check `.dockerignore` first.
-- **FLAC vorbis comment `Add()` appends, not replaces.** Always create a fresh comment block.
+- **The tagger is non-destructive.** It reads existing tags and overwrites only Crate's own fields, so foreign tags (ReplayGain, the MusicBrainz recording id, etc. written by Music Assistant) survive a re-tag. FLAC `Add()` appends, so it filters Crate's keys out of the existing block before re-adding; MP3 uses `Parse:true` + `DeleteFrames`.
 - **Frontend should not pass info the backend can resolve.** The backend resolves providers from settings/entity data.
 - **Present designs for reaction, don't ask multiple-choice during architecture.** Show one approach and let user redirect.
 - **Deezer API needs rate limiting.** 10 req/s. MusicBrainz needs 1 req/s.

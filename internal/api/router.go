@@ -17,6 +17,7 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/importer"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/reject"
 )
 
 type Server struct {
@@ -26,6 +27,7 @@ type Server struct {
 	downloader  *downloader.Service
 	activityLog *activity.Log
 	importer    *importer.Service
+	reject      *reject.Service
 	router      chi.Router
 	frontendFS  fs.FS
 	bgWork      sync.WaitGroup
@@ -42,6 +44,7 @@ func NewServer(queries *db.Queries, providers *provider.Manager, c *cache.Cache,
 		downloader:  dl,
 		activityLog: actLog,
 		importer:    importer.NewService(queries, libraryDir, actLog),
+		reject:      reject.NewService(queries, libraryDir, actLog),
 		frontendFS:  frontendFS,
 		startTime:   time.Now().UTC(),
 		libraryDir:  libraryDir,

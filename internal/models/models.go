@@ -84,6 +84,7 @@ type Track struct {
 	DownloadedFilename *string     `json:"downloaded_filename,omitempty" db:"downloaded_filename"`
 	DownloadFormat     *string     `json:"download_format,omitempty" db:"download_format"`
 	DownloadBitrate    *int        `json:"download_bitrate,omitempty" db:"download_bitrate"`
+	MBRecordingID      *string     `json:"mb_recording_id,omitempty" db:"mb_recording_id"`
 	CreatedAt       string      `json:"created_at" db:"created_at"`
 	UpdatedAt       string      `json:"updated_at" db:"updated_at"`
 	AlbumTitle      string      `json:"album_title,omitempty"`

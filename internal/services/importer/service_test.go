@@ -22,6 +22,7 @@ type trackTags struct {
 	artist, albumArtist, album, title string
 	track, disc, year                 int
 	mbArtistID, mbRGID, mbTrackID     string
+	mbRecordingID                     string
 }
 
 func writeMP3Fixture(t *testing.T, path string, tt trackTags) {
@@ -72,6 +73,9 @@ func writeMP3Fixture(t *testing.T, path string, tt trackTags) {
 			})
 		}
 	}
+	if tt.mbRecordingID != "" {
+		tag.AddUFIDFrame(id3v2.UFIDFrame{OwnerIdentifier: "http://musicbrainz.org", Identifier: []byte(tt.mbRecordingID)})
+	}
 	if err := tag.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -113,6 +117,9 @@ func writeFLACFixture(t *testing.T, path string, tt trackTags) {
 	}
 	if tt.mbTrackID != "" {
 		cmt.Add("MUSICBRAINZ_RELEASETRACKID", tt.mbTrackID)
+	}
+	if tt.mbRecordingID != "" {
+		cmt.Add("MUSICBRAINZ_TRACKID", tt.mbRecordingID)
 	}
 	block := cmt.Marshal()
 	f.Meta = append(f.Meta, &block)
@@ -334,6 +341,45 @@ func TestImportMusicBrainzTags(t *testing.T) {
 	}
 	if _, err := env.queries.FindTrackByProvider("musicbrainz", tags.mbTrackID); err != nil {
 		t.Fatalf("track not under release-track id: %v", err)
+	}
+}
+
+func TestImportCapturesRecordingID(t *testing.T) {
+	env := newImpEnv(t)
+	const flacRec = "11111111-2222-3333-4444-555555555555"
+	const mp3Rec = "66666666-7777-8888-9999-aaaaaaaaaaaa"
+	writeFLACFixture(t, filepath.Join(env.library, "flac-song.flac"),
+		trackTags{artist: "Boards of Canada", album: "Geogaddi", title: "Music Is Math", track: 1, mbRecordingID: flacRec})
+	writeMP3Fixture(t, filepath.Join(env.library, "mp3-song.mp3"),
+		trackTags{artist: "Boards of Canada", album: "Geogaddi", title: "Gyroscope", track: 2, mbRecordingID: mp3Rec})
+
+	env.runImport(t, "", false)
+
+	artist, err := env.queries.FindArtistByNameFold("boards of canada")
+	if err != nil {
+		t.Fatal(err)
+	}
+	album, err := env.queries.FindAlbumByArtistTitleFold(artist.ID, "geogaddi")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Recording id captured from the FLAC MUSICBRAINZ_TRACKID tag, findable by it.
+	flacTrack, err := env.queries.FindTrackByAlbumRecordingID(album.ID, flacRec)
+	if err != nil {
+		t.Fatalf("FLAC recording id not captured / not findable: %v", err)
+	}
+	if flacTrack.Title != "Music Is Math" {
+		t.Errorf("recording-id match returned wrong track: %q", flacTrack.Title)
+	}
+
+	// And from the MP3 UFID frame (owner musicbrainz.org).
+	mp3Track, err := env.queries.FindTrackByAlbumRecordingID(album.ID, mp3Rec)
+	if err != nil {
+		t.Fatalf("MP3 recording id not captured / not findable: %v", err)
+	}
+	if mp3Track.Title != "Gyroscope" {
+		t.Errorf("recording-id match returned wrong track: %q", mp3Track.Title)
 	}
 }
 

@@ -33,6 +33,14 @@ const settingsSections = [
     ],
   },
   {
+    title: 'Music Assistant (optional)',
+    fields: [
+      { key: 'music_assistant_url', label: 'URL', placeholder: 'https://music.stout.zone', description: 'Syncs the library after each download and watches the reject playlist (restart to connect)' },
+      { key: 'music_assistant_token', label: 'API Token', placeholder: 'Long-lived MA token', type: 'password' },
+      { key: 'music_assistant_reject_playlist', label: 'Reject Playlist', placeholder: 'Crate Reject', description: 'Add a track to this MA playlist to mark it bad — auto-created if missing' },
+    ],
+  },
+  {
     title: 'Scheduling',
     fields: [
       { key: 'max_auto_queue', label: 'Max Auto-Queue Per Cycle', placeholder: '50', type: 'number', description: 'Limit how many wanted tracks the scheduler queues per cycle' },

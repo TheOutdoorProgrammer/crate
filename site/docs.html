@@ -410,12 +410,14 @@
         <a href="#quality-upgrades" class="sidebar-link">Quality Upgrades</a>
         <a href="#library-import" class="sidebar-link">Library Import</a>
         <a href="#navidrome" class="sidebar-link">Navidrome</a>
+        <a href="#music-assistant" class="sidebar-link">Music Assistant</a>
         <a href="#supported-formats" class="sidebar-link">Supported Formats</a>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-heading">Integrations</div>
         <a href="#lidarr" class="sidebar-link">Lidarr Compatibility</a>
         <a href="#navidrome" class="sidebar-link">Navidrome</a>
+        <a href="#music-assistant" class="sidebar-link">Music Assistant</a>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-heading">Reference</div>
@@ -447,7 +449,8 @@
   ├── Downloader (slskd integration)
   ├── Organizer (file moves + naming template)
   ├── Tagger (ID3/FLAC metadata + cover art)
-  └── Navidrome notifier (optional library scan trigger)</div>
+  ├── Navidrome notifier (optional library scan trigger)
+  └── Music Assistant (optional sync notifier + reject-playlist watcher)</div>
 
       <!-- Deployment -->
       <h2 id="deployment">Deployment</h2>
@@ -688,6 +691,21 @@
               <td><em>none</em></td>
               <td>Navidrome password. Treated as sensitive (masked in the UI).</td>
             </tr>
+            <tr>
+              <td><code>music_assistant_url</code></td>
+              <td><em>none</em></td>
+              <td>URL of your Music Assistant server (e.g. <code>https://music.stout.zone</code>). Triggers a sync after each download and enables the reject-playlist watcher. See <a href="#music-assistant">Music Assistant Integration</a>. Needs a restart to connect.</td>
+            </tr>
+            <tr>
+              <td><code>music_assistant_token</code></td>
+              <td><em>none</em></td>
+              <td>Long-lived Music Assistant API token. Treated as sensitive (masked in the UI).</td>
+            </tr>
+            <tr>
+              <td><code>music_assistant_reject_playlist</code></td>
+              <td><code>Crate Reject</code></td>
+              <td>Name of the Music Assistant playlist to watch for tracks to mark bad. Auto-created if it doesn't exist.</td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -818,7 +836,7 @@
         <li><strong>Download</strong> &mdash; the file is downloaded via slskd. Track status changes to <code>downloading</code>. The downloader checks progress every 10 seconds.</li>
         <li><strong>Organize</strong> &mdash; completed downloads are moved into the library using the configurable <a href="#naming-template">naming template</a>.</li>
         <li><strong>Tag</strong> &mdash; metadata (artist, album, track name, track number, year) and cover art are embedded into the file.</li>
-        <li><strong>Notify</strong> &mdash; if Navidrome is configured, a library scan is triggered. Track status becomes <code>owned</code>.</li>
+        <li><strong>Notify</strong> &mdash; if Navidrome and/or Music Assistant are configured, a library scan/sync is triggered. Track status becomes <code>owned</code>.</li>
       </ol>
 
       <h3>Retry, Blacklist &amp; Shadow Bans</h3>
@@ -1049,6 +1067,52 @@
 
       <div class="callout">
         <strong>Tip:</strong> Point both Crate's <code>CRATE_LIBRARY_PATH</code> and Navidrome's music folder to the same directory (or use a shared volume). Crate organizes files using the <a href="#naming-template">naming template</a>, which you can set to match an existing library convention, and Navidrome indexes them automatically.
+      </div>
+
+      <!-- Music Assistant -->
+      <h2 id="music-assistant">Music Assistant Integration</h2>
+
+      <p>Crate can connect to <a href="https://www.music-assistant.io/">Music Assistant</a> over a single persistent websocket to do two things: trigger a library sync after each successful download (so new music shows up right away), and let you mark a track bad straight from the Music Assistant app. It runs <em>alongside</em> Navidrome &mdash; if both are configured, both fire after a download.</p>
+
+      <h3>Sync after downloads</h3>
+      <p>Just like the Navidrome scan trigger, Crate tells Music Assistant to sync once a download is organized and tagged, so the new file appears in your MA library without waiting for the next scheduled sync.</p>
+
+      <h3>Mark a track bad from the app</h3>
+      <p>Drop a track into a dedicated <strong>reject playlist</strong> in the Music Assistant app and Crate takes it from there. Crate watches that playlist, and for each track it can map back to a library file it owns, it runs the normal <a href="https://github.com/TheOutdoorProgrammer/crate">reject</a> flow &mdash; delete the bad file, blacklist the source it came from, and re-download a better copy &mdash; then removes the track from the playlist. The playlist is auto-created if it doesn't exist.</p>
+
+      <p>Only local library files Crate owns are rejected. Streaming tracks (Spotify, YouTube Music, etc.) dropped into the playlist are left untouched.</p>
+
+      <h3>Setup</h3>
+      <p>Configure these three settings in the Crate UI (Settings page):</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Setting</th>
+              <th>Example</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>music_assistant_url</code></td>
+              <td><code>https://music.stout.zone</code></td>
+            </tr>
+            <tr>
+              <td><code>music_assistant_token</code></td>
+              <td><code>your_long_lived_token</code></td>
+            </tr>
+            <tr>
+              <td><code>music_assistant_reject_playlist</code></td>
+              <td><code>Crate Reject</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The token is a long-lived Music Assistant API token and is treated as sensitive (masked in the UI), the same as the Navidrome password. The reject playlist name defaults to <code>Crate Reject</code>.</p>
+
+      <div class="callout">
+        <strong>Restart to connect:</strong> Music Assistant holds a persistent websocket connection that is established at startup. You can edit the config values in the UI anytime, but Crate only connects (and starts watching the reject playlist) when it starts &mdash; restart Crate after configuring it for the first time.
       </div>
 
       <!-- Supported Formats -->

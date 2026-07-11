@@ -29,6 +29,7 @@ type fileMeta struct {
 	MBArtistID       string // album artist MBID
 	MBReleaseGroupID string // matches Crate's MusicBrainz album namespace
 	MBTrackID        string // release-track MBID, matches album browse tracks
+	MBRecordingID    string // recording MBID (AcoustID fingerprint / Music Assistant), release-independent
 }
 
 // readTags extracts metadata from a music file. Only MP3 and FLAC are
@@ -74,6 +75,15 @@ func readMP3(path string) (*fileMeta, error) {
 			m.MBReleaseGroupID = strings.TrimSpace(udf.Value)
 		case "musicbrainz release track id":
 			m.MBTrackID = strings.TrimSpace(udf.Value)
+		}
+	}
+
+	// The MusicBrainz recording id lives in a UFID frame (owner musicbrainz.org),
+	// not TXXX — that's what AcoustID / Music Assistant write.
+	for _, f := range tag.GetFrames(tag.CommonID("Unique file identifier")) {
+		if ufid, ok := f.(id3v2.UFIDFrame); ok && ufid.OwnerIdentifier == "http://musicbrainz.org" {
+			m.MBRecordingID = strings.TrimSpace(string(ufid.Identifier))
+			break
 		}
 	}
 
@@ -132,6 +142,8 @@ func readFLAC(path string) (*fileMeta, error) {
 				m.MBReleaseGroupID = val
 			case "MUSICBRAINZ_RELEASETRACKID":
 				m.MBTrackID = val
+			case "MUSICBRAINZ_TRACKID":
+				m.MBRecordingID = val
 			}
 		}
 	}

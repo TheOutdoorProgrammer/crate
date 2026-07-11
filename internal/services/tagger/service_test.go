@@ -3,7 +3,6 @@ package tagger
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,13 +68,13 @@ func makeMinimalWAV() []byte {
 
 	// fmt chunk: PCM, 1 channel, 44100 Hz, 16-bit
 	buf = append(buf, []byte("fmt ")...)
-	buf = append(buf, 16, 0, 0, 0) // chunk size
-	buf = append(buf, 1, 0)         // PCM
-	buf = append(buf, 1, 0)         // 1 channel
-	buf = append(buf, 0x44, 0xAC, 0, 0) // 44100 Hz
+	buf = append(buf, 16, 0, 0, 0)         // chunk size
+	buf = append(buf, 1, 0)                // PCM
+	buf = append(buf, 1, 0)                // 1 channel
+	buf = append(buf, 0x44, 0xAC, 0, 0)    // 44100 Hz
 	buf = append(buf, 0x88, 0x58, 0x01, 0) // byte rate
-	buf = append(buf, 2, 0)         // block align
-	buf = append(buf, 16, 0)        // bits per sample
+	buf = append(buf, 2, 0)                // block align
+	buf = append(buf, 16, 0)               // bits per sample
 
 	// data chunk: 2 bytes of silence
 	buf = append(buf, []byte("data")...)
@@ -210,14 +209,14 @@ func makeMinimalFLAC() []byte {
 	buf.WriteString("fLaC")
 
 	// STREAMINFO block header: last-metadata-block=1, type=0, length=34
-	buf.WriteByte(0x80) // last block flag + type 0 (STREAMINFO)
+	buf.WriteByte(0x80)                 // last block flag + type 0 (STREAMINFO)
 	buf.Write([]byte{0x00, 0x00, 0x22}) // length = 34
 
 	// STREAMINFO data (34 bytes)
 	si := make([]byte, 34)
 	binary.BigEndian.PutUint16(si[0:2], 4096) // min block size
 	binary.BigEndian.PutUint16(si[2:4], 4096) // max block size
-	si[10] = 0xAC // sample rate high bits (44100)
+	si[10] = 0xAC                             // sample rate high bits (44100)
 	si[11] = 0x44
 	si[12] = byte((44100&0xF)<<4) | byte(1<<1) | byte(15>>4) // rate low | channels-1 | bps-1 high
 	si[13] = byte(15&0xF) << 4
@@ -227,69 +226,6 @@ func makeMinimalFLAC() []byte {
 	buf.Write([]byte{0xFF, 0xF8, 0x00, 0x00})
 
 	return buf.Bytes()
-}
-
-func TestTagMP3_WritesComment(t *testing.T) {
-	dir := t.TempDir()
-	mp3Path := filepath.Join(dir, "test.mp3")
-	if err := os.WriteFile(mp3Path, makeMinimalMP3(), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	meta := TrackMeta{
-		Title:   "Test Song",
-		Artist:  "Test Artist",
-		Album:   "Test Album",
-		CrateID: 42,
-	}
-	if err := tagMP3(mp3Path, meta); err != nil {
-		t.Fatal(err)
-	}
-
-	tag, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tag.Close()
-
-	frames := tag.GetFrames(tag.CommonID("Comments"))
-	if len(frames) == 0 {
-		t.Fatal("expected COMM frame, got none")
-	}
-	cf, ok := frames[0].(id3v2.CommentFrame)
-	if !ok {
-		t.Fatal("frame is not a CommentFrame")
-	}
-	if cf.Text != "crate:42" {
-		t.Errorf("COMM text = %q, want %q", cf.Text, "crate:42")
-	}
-	if cf.Language != "eng" {
-		t.Errorf("COMM language = %q, want %q", cf.Language, "eng")
-	}
-}
-
-func TestTagMP3_NoCrateID(t *testing.T) {
-	dir := t.TempDir()
-	mp3Path := filepath.Join(dir, "test.mp3")
-	if err := os.WriteFile(mp3Path, makeMinimalMP3(), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	meta := TrackMeta{Title: "Test Song", Artist: "Test Artist", Album: "Test Album"}
-	if err := tagMP3(mp3Path, meta); err != nil {
-		t.Fatal(err)
-	}
-
-	tag, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tag.Close()
-
-	frames := tag.GetFrames(tag.CommonID("Comments"))
-	if len(frames) != 0 {
-		t.Errorf("expected no COMM frames when CrateID=0, got %d", len(frames))
-	}
 }
 
 func TestTagMP3_AllFields(t *testing.T) {
@@ -306,7 +242,6 @@ func TestTagMP3_AllFields(t *testing.T) {
 		TrackNumber: 1,
 		DiscNumber:  1,
 		Year:        1997,
-		CrateID:     99,
 	}
 	if err := tagMP3(mp3Path, meta); err != nil {
 		t.Fatal(err)
@@ -330,87 +265,57 @@ func TestTagMP3_AllFields(t *testing.T) {
 	if tag.Year() != "1997" {
 		t.Errorf("year = %q, want %q", tag.Year(), "1997")
 	}
-
-	frames := tag.GetFrames(tag.CommonID("Comments"))
-	if len(frames) == 0 {
-		t.Fatal("expected COMM frame")
-	}
-	cf := frames[0].(id3v2.CommentFrame)
-	if cf.Text != "crate:99" {
-		t.Errorf("COMM text = %q, want %q", cf.Text, "crate:99")
-	}
 }
 
-func TestTagFLAC_WritesComment(t *testing.T) {
+// TestTagMP3_PreservesForeignFrames proves the non-destructive re-tag: frames
+// written by other tools (Music Assistant / Picard — ISRC, AcoustID, and by the
+// same mechanism the MusicBrainz recording-id UFID) survive, while Crate's own
+// fields are replaced rather than duplicated, and no crate: comment is written.
+func TestTagMP3_PreservesForeignFrames(t *testing.T) {
 	dir := t.TempDir()
-	flacPath := filepath.Join(dir, "test.flac")
-	if err := os.WriteFile(flacPath, makeMinimalFLAC(), 0644); err != nil {
+	mp3Path := filepath.Join(dir, "test.mp3")
+	if err := os.WriteFile(mp3Path, makeMinimalMP3(), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	meta := TrackMeta{
-		Title:   "Test Song",
-		Artist:  "Test Artist",
-		Album:   "Test Album",
-		CrateID: 42,
-	}
-	if err := tagFLAC(flacPath, meta); err != nil {
-		t.Fatal(err)
-	}
-
-	f, err := flac.ParseFile(flacPath)
+	seed, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	var found bool
-	for _, block := range f.Meta {
-		if block.Type == flac.VorbisComment {
-			cmt, err := flacvorbis.ParseFromMetaDataBlock(*block)
-			if err != nil {
-				t.Fatal(err)
-			}
-			comments, _ := cmt.Get("COMMENT")
-			for _, c := range comments {
-				if c == "crate:42" {
-					found = true
-				}
-			}
-		}
+	seed.SetTitle("Stale Title")
+	seed.AddTextFrame("TSRC", id3v2.EncodingUTF8, "USRC17607839")
+	seed.AddUserDefinedTextFrame(id3v2.UserDefinedTextFrame{
+		Encoding:    id3v2.EncodingUTF8,
+		Description: "Acoustid Id",
+		Value:       "acoustid-uuid-1234",
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatal(err)
 	}
-	if !found {
-		t.Error("expected COMMENT=crate:42 in FLAC vorbis comments")
-	}
-}
+	seed.Close()
 
-func TestTagFLAC_NoCrateID(t *testing.T) {
-	dir := t.TempDir()
-	flacPath := filepath.Join(dir, "test.flac")
-	if err := os.WriteFile(flacPath, makeMinimalFLAC(), 0644); err != nil {
+	meta := TrackMeta{Title: "New Title", Artist: "Artist", Album: "Album", TrackNumber: 1, Year: 2020}
+	if err := tagMP3(mp3Path, meta); err != nil {
 		t.Fatal(err)
 	}
 
-	meta := TrackMeta{Title: "Test Song", Artist: "Test Artist", Album: "Test Album"}
-	if err := tagFLAC(flacPath, meta); err != nil {
-		t.Fatal(err)
-	}
-
-	f, err := flac.ParseFile(flacPath)
+	tag, err := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tag.Close()
 
-	for _, block := range f.Meta {
-		if block.Type == flac.VorbisComment {
-			cmt, err := flacvorbis.ParseFromMetaDataBlock(*block)
-			if err != nil {
-				t.Fatal(err)
-			}
-			comments, _ := cmt.Get("COMMENT")
-			if len(comments) > 0 {
-				t.Errorf("expected no COMMENT field when CrateID=0, got %v", comments)
-			}
-		}
+	if got := tag.GetTextFrame("TSRC").Text; got != "USRC17607839" {
+		t.Errorf("TSRC (ISRC) = %q, want it preserved", got)
+	}
+	if txxx := tag.GetFrames(tag.CommonID("User defined text information frame")); len(txxx) == 0 {
+		t.Error("TXXX (Acoustid Id) frame did not survive re-tag")
+	}
+	if tag.Title() != "New Title" {
+		t.Errorf("title = %q, want New Title (stale title should be replaced, not duplicated)", tag.Title())
+	}
+	if c := tag.GetFrames(tag.CommonID("Comments")); len(c) != 0 {
+		t.Errorf("expected no COMM frame (crate: tag dropped), got %d", len(c))
 	}
 }
 
@@ -428,7 +333,6 @@ func TestTagFLAC_AllFields(t *testing.T) {
 		TrackNumber: 1,
 		DiscNumber:  1,
 		Year:        1997,
-		CrateID:     99,
 	}
 	if err := tagFLAC(flacPath, meta); err != nil {
 		t.Fatal(err)
@@ -460,87 +364,79 @@ func TestTagFLAC_AllFields(t *testing.T) {
 		check("TRACKNUMBER", "1")
 		check("DISCNUMBER", "1")
 		check("DATE", "1997")
-		check("COMMENT", "crate:99")
 	}
 }
 
-func TestTagWAV_WritesComment(t *testing.T) {
+// TestTagFLAC_PreservesForeignTags is the critical-path regression guard: the
+// library is FLAC, and Music Assistant writes ReplayGain + the MusicBrainz
+// recording id into Vorbis comments. Crate must overwrite only its own fields
+// and leave everything else intact.
+func TestTagFLAC_PreservesForeignTags(t *testing.T) {
 	dir := t.TempDir()
-	wavPath := filepath.Join(dir, "test.wav")
-	if err := os.WriteFile(wavPath, makeMinimalWAV(), 0644); err != nil {
+	flacPath := filepath.Join(dir, "test.flac")
+	if err := os.WriteFile(flacPath, makeMinimalFLAC(), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	meta := TrackMeta{
-		Title:   "Test Song",
-		Artist:  "Test Artist",
-		Album:   "Test Album",
-		CrateID: 42,
-	}
-	if err := tagWAV(wavPath, meta); err != nil {
-		t.Fatal(err)
-	}
-
-	data, err := os.ReadFile(wavPath)
+	// Seed tags another tool (Music Assistant) would write, plus a stale title
+	// Crate should replace without duplicating.
+	f, err := flac.ParseFile(flacPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if !bytes.Contains(data, []byte("ICMT")) {
-		t.Error("tagged WAV should contain ICMT chunk")
-	}
-	if !bytes.Contains(data, []byte("crate:42")) {
-		t.Error("tagged WAV should contain crate:42 in ICMT")
-	}
-}
-
-func TestTagWAV_NoCrateID(t *testing.T) {
-	dir := t.TempDir()
-	wavPath := filepath.Join(dir, "test.wav")
-	if err := os.WriteFile(wavPath, makeMinimalWAV(), 0644); err != nil {
+	seed := flacvorbis.New()
+	seed.Add("TITLE", "Stale Title")
+	seed.Add("REPLAYGAIN_TRACK_GAIN", "-5.30 dB")
+	seed.Add("MUSICBRAINZ_TRACKID", "11111111-2222-3333-4444-555555555555")
+	seedBlock := seed.Marshal()
+	f.Meta = append(f.Meta, &seedBlock)
+	if err := f.Save(flacPath); err != nil {
 		t.Fatal(err)
 	}
 
-	meta := TrackMeta{Title: "Test Song", Artist: "Test Artist", Album: "Test Album", TrackNumber: 1, Year: 2020}
-	if err := tagWAV(wavPath, meta); err != nil {
+	meta := TrackMeta{Title: "New Title", Artist: "Artist", Album: "Album", TrackNumber: 1, Year: 2020}
+	if err := tagFLAC(flacPath, meta); err != nil {
 		t.Fatal(err)
 	}
 
-	data, err := os.ReadFile(wavPath)
+	f2, err := flac.ParseFile(flacPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if bytes.Contains(data, []byte("ICMT")) {
-		t.Error("expected no ICMT chunk when CrateID=0")
+	var cmt *flacvorbis.MetaDataBlockVorbisComment
+	for _, block := range f2.Meta {
+		if block.Type == flac.VorbisComment {
+			cmt, err = flacvorbis.ParseFromMetaDataBlock(*block)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-}
-
-func TestTagWAV_CrateIDSurvivesRetag(t *testing.T) {
-	dir := t.TempDir()
-	wavPath := filepath.Join(dir, "test.wav")
-	if err := os.WriteFile(wavPath, makeMinimalWAV(), 0644); err != nil {
-		t.Fatal(err)
+	if cmt == nil {
+		t.Fatal("no vorbis comment block after tagging")
 	}
-
-	meta := TrackMeta{Title: "Song", Artist: "Artist", Album: "Album", TrackNumber: 1, Year: 2020, CrateID: 55}
-	if err := tagWAV(wavPath, meta); err != nil {
-		t.Fatal(err)
-	}
-	if err := tagWAV(wavPath, meta); err != nil {
-		t.Fatal(err)
+	get := func(field string) []string {
+		v, _ := cmt.Get(field)
+		return v
 	}
 
-	data, _ := os.ReadFile(wavPath)
-	count := bytes.Count(data, []byte("crate:55"))
-	if count != 1 {
-		t.Errorf("expected exactly 1 occurrence of crate:55 after retag, got %d", count)
+	if rg := get("REPLAYGAIN_TRACK_GAIN"); len(rg) != 1 || rg[0] != "-5.30 dB" {
+		t.Errorf("REPLAYGAIN_TRACK_GAIN = %v, want [-5.30 dB] preserved", rg)
+	}
+	if mb := get("MUSICBRAINZ_TRACKID"); len(mb) != 1 || mb[0] != "11111111-2222-3333-4444-555555555555" {
+		t.Errorf("MUSICBRAINZ_TRACKID = %v, want the seeded UUID preserved", mb)
+	}
+	if title := get("TITLE"); len(title) != 1 || title[0] != "New Title" {
+		t.Errorf("TITLE = %v, want [New Title] (stale replaced, not duplicated)", title)
+	}
+	if c := get("COMMENT"); len(c) != 0 {
+		t.Errorf("expected no COMMENT field (crate: tag dropped), got %v", c)
 	}
 }
 
 func TestTagDispatch(t *testing.T) {
 	dir := t.TempDir()
-	meta := TrackMeta{Title: "T", Artist: "A", Album: "Al", CrateID: 7}
+	meta := TrackMeta{Title: "DispatchTitle", Artist: "A", Album: "Al", TrackNumber: 1, Year: 2001}
 
 	// WAV via Tag()
 	wavPath := filepath.Join(dir, "test.wav")
@@ -549,8 +445,8 @@ func TestTagDispatch(t *testing.T) {
 		t.Fatalf("Tag(.wav) failed: %v", err)
 	}
 	data, _ := os.ReadFile(wavPath)
-	if !bytes.Contains(data, []byte(fmt.Sprintf("crate:%d", meta.CrateID))) {
-		t.Error("Tag(.wav) should write crate ID")
+	if !bytes.Contains(data, []byte("DispatchTitle")) {
+		t.Error("Tag(.wav) should write the title")
 	}
 
 	// MP3 via Tag()
@@ -561,9 +457,8 @@ func TestTagDispatch(t *testing.T) {
 	}
 	tag, _ := id3v2.Open(mp3Path, id3v2.Options{Parse: true})
 	defer tag.Close()
-	frames := tag.GetFrames(tag.CommonID("Comments"))
-	if len(frames) == 0 {
-		t.Error("Tag(.mp3) should write COMM frame")
+	if tag.Title() != "DispatchTitle" {
+		t.Error("Tag(.mp3) should write the title frame")
 	}
 
 	// FLAC via Tag()
@@ -577,15 +472,15 @@ func TestTagDispatch(t *testing.T) {
 	for _, block := range f.Meta {
 		if block.Type == flac.VorbisComment {
 			cmt, _ := flacvorbis.ParseFromMetaDataBlock(*block)
-			comments, _ := cmt.Get("COMMENT")
-			for _, c := range comments {
-				if c == "crate:7" {
+			vals, _ := cmt.Get("TITLE")
+			for _, v := range vals {
+				if v == "DispatchTitle" {
 					found = true
 				}
 			}
 		}
 	}
 	if !found {
-		t.Error("Tag(.flac) should write COMMENT vorbis field")
+		t.Error("Tag(.flac) should write the TITLE vorbis field")
 	}
 }

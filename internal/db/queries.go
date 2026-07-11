@@ -287,10 +287,10 @@ func (q *Queries) CreateImportedTrack(t *models.Track) error {
 	ts := now()
 	result, err := q.db.Exec(
 		`INSERT INTO tracks (album_id, title, track_number, disc_number, duration_ms, provider, provider_id,
-		                     status, file_path, download_format, download_bitrate, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                     status, file_path, download_format, download_bitrate, mb_recording_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.AlbumID, t.Title, t.TrackNumber, t.DiscNumber, t.DurationMs, t.Provider, t.ProviderID,
-		t.Status, t.FilePath, t.DownloadFormat, t.DownloadBitrate, ts, ts,
+		t.Status, t.FilePath, t.DownloadFormat, t.DownloadBitrate, t.MBRecordingID, ts, ts,
 	)
 	if err != nil {
 		return err
@@ -302,12 +302,13 @@ func (q *Queries) CreateImportedTrack(t *models.Track) error {
 // ClaimTrackFile marks an existing track as owned by a file found on disk —
 // e.g. a wanted track the user already has. Duration is only filled in when
 // the row doesn't have one from its provider.
-func (q *Queries) ClaimTrackFile(id int64, filePath, format string, bitrate, durationMs int) error {
+func (q *Queries) ClaimTrackFile(id int64, filePath, format string, bitrate, durationMs int, mbRecordingID *string) error {
 	_, err := q.db.Exec(
 		`UPDATE tracks SET status = 'owned', file_path = ?, download_format = ?, download_bitrate = ?,
-		        duration_ms = CASE WHEN duration_ms > 0 THEN duration_ms ELSE ? END, updated_at = ?
+		        duration_ms = CASE WHEN duration_ms > 0 THEN duration_ms ELSE ? END,
+		        mb_recording_id = COALESCE(?, mb_recording_id), updated_at = ?
 		 WHERE id = ?`,
-		filePath, format, bitrate, durationMs, now(), id)
+		filePath, format, bitrate, durationMs, mbRecordingID, now(), id)
 	return err
 }
 
@@ -334,6 +335,43 @@ func (q *Queries) FindTrackByProvider(provider, providerID string) (*models.Trac
 		`SELECT id, album_id, title, track_number, disc_number, duration_ms, provider, provider_id,
 		        status, file_path, downloaded_from, downloaded_filename, download_format, download_bitrate, created_at, updated_at
 		 FROM tracks WHERE provider = ? AND provider_id = ?`, provider, providerID,
+	).Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
+		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
+		&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// FindTrackByAlbumRecordingID matches a track within an album by MusicBrainz
+// recording id — the fingerprint-verified identity AcoustID / Music Assistant
+// writes. Scoped to the album so a recording shared across releases can't claim
+// a file into the wrong one; highest-confidence import match.
+func (q *Queries) FindTrackByAlbumRecordingID(albumID int64, mbRecordingID string) (*models.Track, error) {
+	t := &models.Track{}
+	err := q.db.QueryRow(
+		`SELECT id, album_id, title, track_number, disc_number, duration_ms, provider, provider_id,
+		        status, file_path, downloaded_from, downloaded_filename, download_format, download_bitrate, created_at, updated_at
+		 FROM tracks WHERE album_id = ? AND mb_recording_id = ? LIMIT 1`, albumID, mbRecordingID,
+	).Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
+		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
+		&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// FindTrackByPath finds an owned track by its stored file path — used by the
+// Music Assistant reject watcher to map an MA filesystem track (whose provider
+// item_id is the same library-relative path Crate stores) back to a track.
+func (q *Queries) FindTrackByPath(filePath string) (*models.Track, error) {
+	t := &models.Track{}
+	err := q.db.QueryRow(
+		`SELECT id, album_id, title, track_number, disc_number, duration_ms, provider, provider_id,
+		        status, file_path, downloaded_from, downloaded_filename, download_format, download_bitrate, created_at, updated_at
+		 FROM tracks WHERE file_path = ? AND status = 'owned' LIMIT 1`, filePath,
 	).Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
 		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
 		&t.DownloadFormat, &t.DownloadBitrate, &t.CreatedAt, &t.UpdatedAt)

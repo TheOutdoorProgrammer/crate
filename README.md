@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Self-hosted music manager. Search for artists via pluggable providers (MusicBrainz, Deezer, or custom gRPC), watch their discographies, and automatically download via <a href="https://github.com/slskd/slskd">slskd</a> (Soulseek). Optional <a href="https://www.navidrome.org/">Navidrome</a> integration triggers library scans so new music appears immediately. Mobile-first UI.
+  Self-hosted music manager. Search for artists via pluggable providers (MusicBrainz, Deezer, or custom gRPC), watch their discographies, and automatically download via <a href="https://github.com/slskd/slskd">slskd</a> (Soulseek). Optional <a href="https://www.navidrome.org/">Navidrome</a> and <a href="https://www.music-assistant.io/">Music Assistant</a> integrations trigger a library scan/sync so new music appears immediately — and with Music Assistant you can mark a track bad right from the app. Mobile-first UI.
 </p>
 
 <p align="center">
@@ -80,15 +80,16 @@ Open `http://localhost:6969`.
 - **Negative keywords** -- skip files matching configurable keywords (e.g. acapella, instrumental) during auto-download. Manual search still shows them so you can override when needed.
 - **Import existing library** -- tag-based scan of your on-disk collection with dry-run preview; MusicBrainz-tagged files (Picard/beets) link to their real provider IDs automatically
 - **Navidrome integration** -- optionally trigger a Navidrome library scan after each download so new files appear immediately
+- **Music Assistant integration** -- optionally sync your [Music Assistant](https://www.music-assistant.io/) library after each download, and **mark a track bad right from the MA app** by dropping it into a reject playlist: Crate deletes the bad copy, blacklists the source, and re-downloads a better one
 - **Organize** -- moves completed files into the library using a configurable naming template (default `{artist}/{album} ({year})/{track:2} - {title}`), so Crate can match an existing library convention
-- **Metadata tagging** -- writes ID3v2 (MP3), Vorbis comments (FLAC), and RIFF INFO (WAV) with artist, album, track, year, and cover art (MP3/FLAC)
+- **Metadata tagging** -- writes ID3v2 (MP3), Vorbis comments (FLAC), and RIFF INFO (WAV) with artist, album, track, year, and cover art (MP3/FLAC). Non-destructive: only Crate's own fields are touched, so tags written by other tools (ReplayGain, MusicBrainz/AcoustID IDs) are preserved
 - **New release detection** -- opt-in per artist, auto-adds albums released after the feature is enabled
 - **File integrity** -- daily check that owned tracks still exist on disk; reverts to "wanted" if missing
 - **Activity log** -- tracks all download activity (search, download, complete, fail) in a separate SQLite DB with configurable retention
 - **Relink** -- reassign any artist to a different provider without losing your library data
 - **Scheduled scans** -- re-queues wanted tracks and checks for new releases on a configurable interval
 - **Duplicate guard** -- prevents duplicate artists, albums, and download queue entries
-- **Settings UI** -- configure providers, slskd connection, Navidrome, quality tiers, quality fallback, shadow ban duration, naming template (with live preview), library path, scan interval, and more from the browser
+- **Settings UI** -- configure providers, slskd connection, Navidrome, Music Assistant, quality tiers, quality fallback, shadow ban duration, naming template (with live preview), library path, scan interval, and more from the browser
 - **Mobile-first** -- responsive layout with bottom nav on mobile, sidebar on desktop
 
 ## Lidarr API Compatibility
@@ -157,7 +158,7 @@ Prefer a custom importer? The schema is documented in [DATABASE.md](DATABASE.md)
 | `CRATE_SCAN_INTERVAL` | `6h` | How often to auto-queue wanted tracks and check for new releases |
 | `CRATE_PROVIDERS` | `musicbrainz:./provider-musicbrainz:50051,deezer:./provider-deezer:50052` | Provider configuration |
 
-Additional settings (default provider, slskd connection, Navidrome, quality tiers, naming template, library path, scan interval) can be configured from the Settings page in the UI.
+Additional settings (default provider, slskd connection, Navidrome, Music Assistant, quality tiers, naming template, library path, scan interval) can be configured from the Settings page in the UI.
 
 ### Library naming template
 
@@ -219,3 +220,6 @@ Design decisions with meaningful trade-offs are documented as ADRs in [`docs/adr
 | [0001](docs/adr/0001-artist-matching-fallback.md) | Auto-downloads require artist+title match (manual-search filtering since removed — see 0003) |
 | [0002](docs/adr/0002-async-manual-search.md) | Async manual search with frontend polling instead of blocking 30s request |
 | [0003](docs/adr/0003-manual-search-no-filter.md) | Manual search returns every slskd result (scored + annotated, never filtered) |
+| [0004](docs/adr/0004-non-destructive-tagging.md) | Tagger preserves foreign tags; the `crate:` comment tag was dropped |
+| [0005](docs/adr/0005-recording-id-signal.md) | MusicBrainz recording id stored as a separate signal, not resolved to release-track |
+| [0006](docs/adr/0006-music-assistant-integration.md) | Music Assistant added alongside Navidrome; mark-bad-from-app via an event-driven reject playlist |

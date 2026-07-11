@@ -300,7 +300,13 @@ func (s *Service) persistTrack(artist *models.Artist, album *models.Album, f *fi
 	mbLinked := album.Provider == musicbrainzProvider && f.MBTrackID != ""
 
 	var track *models.Track
-	if mbLinked {
+	// Fingerprint-verified MusicBrainz recording id (e.g. from Music Assistant's
+	// AcoustID provider) is the highest-confidence signal — trust it first,
+	// scoped to this album.
+	if f.MBRecordingID != "" && album.ID > 0 {
+		track, _ = s.queries.FindTrackByAlbumRecordingID(album.ID, f.MBRecordingID)
+	}
+	if track == nil && mbLinked {
 		track, _ = s.queries.FindTrackByProvider(musicbrainzProvider, f.MBTrackID)
 	}
 	if track == nil && album.ID > 0 {
@@ -339,6 +345,7 @@ func (s *Service) persistTrack(artist *models.Artist, album *models.Album, f *fi
 			FilePath:        &storedPath,
 			DownloadFormat:  &f.Format,
 			DownloadBitrate: &f.Bitrate,
+			MBRecordingID:   optStr(f.MBRecordingID),
 		}
 		if err := s.queries.CreateImportedTrack(t); err != nil {
 			report.skip(f.Path, "db insert failed: "+err.Error())
@@ -360,7 +367,7 @@ func (s *Service) persistTrack(artist *models.Artist, album *models.Album, f *fi
 		if dryRun {
 			return
 		}
-		if err := s.queries.ClaimTrackFile(track.ID, storedPath, f.Format, f.Bitrate, f.DurationMs); err != nil {
+		if err := s.queries.ClaimTrackFile(track.ID, storedPath, f.Format, f.Bitrate, f.DurationMs, optStr(f.MBRecordingID)); err != nil {
 			report.skip(f.Path, "db claim failed: "+err.Error())
 			report.TracksClaimed--
 		}
@@ -408,6 +415,15 @@ func localID(kind string, parts ...string) string {
 		h.Write([]byte(strings.ToLower(strings.TrimSpace(p))))
 	}
 	return "loc-" + hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// optStr returns a pointer to s, or nil when s is empty, so blank tag values
+// persist as SQL NULL rather than "".
+func optStr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // soleKey returns the only non-empty key of m, or "" when the set is empty,

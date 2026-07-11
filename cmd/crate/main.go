@@ -18,8 +18,10 @@ import (
 	"github.com/TheOutdoorProgrammer/crate/internal/db"
 	"github.com/TheOutdoorProgrammer/crate/internal/provider"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/downloader"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/musicassistant"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/navidrome"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/organizer"
+	"github.com/TheOutdoorProgrammer/crate/internal/services/reject"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/scheduler"
 	"github.com/TheOutdoorProgrammer/crate/internal/services/slskd"
 )
@@ -73,6 +75,16 @@ func main() {
 	if err := procMgr.StartProviders(ctx, providerMgr, configs); err != nil {
 		slog.Error("failed to start providers", "error", err)
 		os.Exit(1)
+	}
+
+	// Music Assistant integration (optional; nil when not configured, so nothing
+	// connects or spins a goroutine). One persistent websocket connection backs
+	// both the post-download sync notifier and (once wired) the reject watcher.
+	if maClient := musicassistant.NewClient(queries); maClient != nil {
+		dl.AddNotifier(maClient)
+		watcher := musicassistant.NewRejectWatcher(maClient, queries, reject.NewService(queries, cfg.LibraryPath, actLog))
+		go watcher.Run(ctx)
+		go maClient.Run(ctx)
 	}
 
 	go dl.Run(ctx, 10*time.Second)
