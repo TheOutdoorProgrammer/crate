@@ -10,11 +10,11 @@ func TestNormalizeWSURL(t *testing.T) {
 		in, want string
 		wantErr  bool
 	}{
-		{"https://music.stout.zone", "wss://music.stout.zone/ws", false},
+		{"https://music.example.com", "wss://music.example.com/ws", false},
 		{"http://192.168.1.5:8095", "ws://192.168.1.5:8095/ws", false},
 		{"wss://ma.example.com/ws", "wss://ma.example.com/ws", false},
-		{"https://music.stout.zone/", "wss://music.stout.zone/ws", false},
-		{"music.stout.zone", "", true}, // no scheme
+		{"https://music.example.com/", "wss://music.example.com/ws", false},
+		{"music.example.com", "", true}, // no scheme
 		{"ftp://host", "", true},        // unsupported scheme
 	}
 	for _, c := range cases {

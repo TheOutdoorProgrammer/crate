@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: true,
-    allowedHosts: ['mini-1.stout.zone'],
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: 'http://localhost:6969',
