@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -18,12 +18,18 @@ export default function ArtistDetail() {
   const [showRelinkSearch, setShowRelinkSearch] = useState(false);
   const [relinkQuery, setRelinkQuery] = useState('');
   const [relinkProvider, setRelinkProvider] = useState('');
+  // After linking a local artist the reconcile runs in the background; poll the
+  // artist so its discography fills in live instead of waiting for a reload.
+  const [reconciling, setReconciling] = useState(false);
+  const lastAlbumCount = useRef(-1);
+  const reconcileTicks = useRef(0);
 
   const { data: artist, isLoading } = useQuery({
     queryKey: ['artist', id],
     queryFn: () => api.getArtist(Number(id)),
     enabled: !!id,
     refetchInterval: (query) => {
+      if (reconciling) return 2000;
       const a = query.state.data;
       if (!a?.albums) return false;
       const hasActive = a.albums.some((al: Album) =>
@@ -82,14 +88,34 @@ export default function ArtistDetail() {
 
   const relink = useMutation({
     mutationFn: (providerID: string) => api.relinkEntity('artist', Number(id), providerID),
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['artist', id] });
       queryClient.invalidateQueries({ queryKey: ['artists'] });
       setShowRelinkSearch(false);
-      toast('Artist relinked', 'success');
+      if (res?.reconciling) {
+        lastAlbumCount.current = -1;
+        reconcileTicks.current = 0;
+        setReconciling(true);
+        toast('Linking — filling in the discography…', 'success');
+      } else {
+        toast('Artist relinked', 'success');
+      }
     },
     onError: (err: Error) => toast(err.message, 'error'),
   });
+
+  // Stop polling once the reconcile has drained (album count stable) or after a
+  // ~60s backstop, so the UI settles on the finished discography.
+  useEffect(() => {
+    if (!reconciling || !artist) return;
+    const count = artist.albums?.length ?? 0;
+    reconcileTicks.current += 1;
+    if ((count > 0 && count === lastAlbumCount.current) || reconcileTicks.current > 30) {
+      setReconciling(false);
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+    }
+    lastAlbumCount.current = count;
+  }, [artist, reconciling, queryClient]);
 
   const handleDelete = () => {
     if (confirm(`Delete ${artist?.name}? This removes all their albums and tracks from your library.`)) {
@@ -213,9 +239,29 @@ export default function ArtistDetail() {
         </div>
       </div>
 
+      {artist.provider === 'local' && (
+        <div className="bg-amber-900/20 border border-amber-800/40 rounded-lg px-3 py-2.5 mb-4">
+          <div className="flex items-start gap-2.5">
+            <svg className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-amber-300 font-medium">Not linked to a provider</p>
+              <p className="text-[11px] text-amber-300/60">This imported artist isn't tracked yet. Link it to a provider to reveal its full discography and fill in what's missing.</p>
+            </div>
+            <button
+              onClick={() => setShowRelinkSearch((v) => !v)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-800/40 text-amber-200 active:bg-amber-800/60 transition-colors shrink-0"
+            >
+              Link
+            </button>
+          </div>
+        </div>
+      )}
+
       {showRelinkSearch && (
         <div className="bg-zinc-800/50 rounded-lg p-3 mb-4 animate-fade-in">
-          <p className="text-xs font-medium text-zinc-400 mb-2">Relink to a different provider</p>
+          <p className="text-xs font-medium text-zinc-400 mb-2">{artist.provider === 'local' ? 'Link to a provider' : 'Relink to a different provider'}</p>
           <div className="flex gap-2 mb-2">
             <input
               type="text"
@@ -261,6 +307,13 @@ export default function ArtistDetail() {
           {relinkQuery && relinkResults && relinkResults.artists.length === 0 && (
             <p className="text-xs text-zinc-500 text-center py-2">No results</p>
           )}
+        </div>
+      )}
+
+      {reconciling && (
+        <div className="flex items-center gap-2.5 bg-blue-900/20 border border-blue-800/40 rounded-lg px-3 py-2.5 mb-4">
+          <div className="w-4 h-4 border-2 border-blue-500/40 border-t-blue-400 rounded-full animate-spin shrink-0" />
+          <p className="text-sm text-blue-300">Linking to provider — pulling the discography and matching your files…</p>
         </div>
       )}
 
@@ -364,7 +417,7 @@ export default function ArtistDetail() {
                     })()}
                   </p>
                 </div>
-                <AlbumStatusSummary tracks={album.tracks} />
+                <AlbumStatusSummary album={album} artistProvider={artist.provider} />
                 <svg className="w-4 h-4 text-zinc-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
               </Link>
             ))}
@@ -375,7 +428,13 @@ export default function ArtistDetail() {
   );
 }
 
-function AlbumStatusSummary({ tracks }: { tracks?: Track[] }) {
+function AlbumStatusSummary({ album, artistProvider }: { album: Album; artistProvider: string }) {
+  // A local album under an artist that's since been linked to a real provider is
+  // a leftover the reconcile couldn't match — flag it so the user can link it.
+  if (album.provider === 'local' && artistProvider !== 'local') {
+    return <span className="text-[10px] font-medium text-amber-400 shrink-0">unmatched</span>;
+  }
+  const tracks = album.tracks;
   if (!tracks?.length) return null;
   const owned = tracks.filter((t) => t.status === 'owned').length;
   const ignored = tracks.filter((t) => t.status === 'ignored').length;

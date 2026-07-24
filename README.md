@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD033 MD041 -- intentional centered-HTML GitHub hero header -->
 <p align="center">
   <img src="web/public/cratelogo.png" width="128" alt="Crate logo">
 </p>
@@ -135,7 +136,8 @@ How it works:
 
 - **Tag-based, not path-based.** Folder structure is ignored entirely; only embedded metadata matters. If your library works in Navidrome, your tags are good enough.
 - **Non-destructive.** Files are never moved, renamed, or modified. Changing the naming template later doesn't touch imported files either.
-- **MusicBrainz-tagged libraries link automatically.** Files tagged by Picard or beets carry MusicBrainz IDs; those import under the `musicbrainz` provider with their real IDs (artist MBID, release-group ID, release-track ID) and behave exactly like browsed entities. Everything else imports under the reserved `local` provider with stable tag-derived IDs — relink an artist to a real provider whenever you want search, cover art, or new-release watching for it.
+- **MusicBrainz-tagged libraries link automatically.** Files tagged by Picard or beets carry MusicBrainz IDs; those import under the `musicbrainz` provider with their real IDs (artist MBID, release-group ID, release-track ID) and behave exactly like browsed entities. Everything else imports under the reserved `local` provider with stable tag-derived IDs.
+- **Link a local import to reveal what's missing.** A `local` artist is flagged "not linked" in the Library and on its page. Link it to a provider (you pick the right artist — no risky auto-matching) and Crate pulls the full discography, folds your owned files in (albums matched by title + year, tracks by title, files preserved), and marks the rest `wanted` — turning an imported pile into a tracked artist with its gaps visible. Anything the fuzzy match can't place stays flagged "unmatched": from the album page, merge a leftover album into the right release or link a stray file to the track it belongs to. Owned files are only ever re-pointed, never lost.
 - **Wanted tracks get claimed.** If you already watch an album and import files matching its tracks (by title), those tracks flip to `owned` instead of being re-downloaded.
 - **Idempotent.** Re-running an import skips everything it already knows.
 - **Quality upgrades apply.** Imported tracks record their real format and bitrate (parsed from the files), so the upgrade scanner treats them like any other owned track — import MP3s with a FLAC-first tier list and Crate will gradually upgrade them. Files outside the library folder are never deleted, even when replaced by an upgrade.
@@ -164,7 +166,7 @@ Additional settings (default provider, slskd connection, Navidrome, Music Assist
 
 The folder/file layout for downloads is a template you can change from **Settings → Library** (with a live preview). The default matches Crate's original layout:
 
-```
+```text
 {artist}/{album} ({year})/{track:2} - {title}
 ```
 
@@ -184,7 +186,7 @@ Notes:
 - The template applies to **new downloads only**. Existing files are never renamed when you change it. Quality upgrades use the current template and remove the file they replace, even if it was organized under an older template.
 - Filesystem-unsafe characters (`<>:"/\|?*`) in metadata are replaced with `_`.
 
-## Auth
+## Authentication
 
 Crate does not include built-in authentication. If you need to restrict access, put a reverse proxy with auth in front of it (e.g. [Cloudflare Zero Trust](https://www.cloudflare.com/zero-trust/), Authelia, or nginx basic auth).
 

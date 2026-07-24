@@ -4,7 +4,7 @@ Self-hosted music manager (Lidarr alternative). Search for artists via pluggable
 
 ## Architecture
 
-```
+```text
 cmd/crate/main.go              Entry point. Wires services, starts HTTP server + provider processes.
 cmd/provider-musicbrainz/       Standalone gRPC server for MusicBrainz API
 cmd/provider-deezer/            Standalone gRPC server for Deezer API
@@ -40,7 +40,7 @@ docs/adr/                       Architecture Decision Records
 
 Crate uses gRPC to communicate with music metadata providers. The Docker image ships with MusicBrainz and Deezer providers as child processes managed by the main crate binary.
 
-```
+```text
 crate (main process)
   ├── Provider Manager (routes requests, caches, enriches)
   │   ├── gRPC → provider-musicbrainz (port 50051, 1 req/s rate limit)
@@ -52,6 +52,7 @@ crate (main process)
 ```
 
 Key concepts:
+
 - **Default provider**: used for search and browse (configurable in settings, default: musicbrainz). Users can switch providers on the fly from the search UI.
 - **Provider tracking**: each entity (artist/album/track) stores which provider+ID it came from
 - **Orphan detection**: entities whose provider is unhealthy show as "orphaned" in the UI
@@ -108,6 +109,7 @@ All file selection goes through `scoreCandidates()` in `internal/services/downlo
 - **Queue score (0-15)**: `15 / (1 + queueLength)`. Empty queue = 15, decays toward 0.
 
 Design invariants (enforced by `TestScoringBalance`):
+
 - Same availability → higher tier always wins
 - Artist bonus alone cannot flip a tier (20 < 25 gap)
 - All bonuses combined (max 45) can overcome one tier gap but not two (50)
@@ -147,6 +149,16 @@ Key invariants:
 - **file_path convention**: relative when inside the library dir, absolute otherwise. All resolution goes through `internal/library` (`ResolvePath`/`Contains`/`DeleteFile`) — used by the organizer, reject, the scheduler's integrity check, and the importer. Destructive operations require `Contains` (files outside the library are never deleted).
 - **Recording id capture**: files carrying a MusicBrainz *recording* id (FLAC `MUSICBRAINZ_TRACKID` / MP3 `UFID`) store it in `tracks.mb_recording_id`; the importer prefers it (album-scoped) as the highest-confidence match. See "MusicBrainz recording id".
 - Dry-run runs the identical code path with writes skipped, so its counts are exact. Re-runs are idempotent. Skipped files (missing artist/album/title) are reported with reasons, capped at 100 samples.
+
+### Promoting a local import (ADR-0007)
+
+Import records only what's on disk, so a `local` artist has no gap view until it's linked to a real provider. Linking is user-anchored (the human picks the provider artist — no fuzzy *artist* matching, which would risk same-name mis-joins); the fuzzy work is confined to albums/tracks and always album-scoped, so the worst realistic failure is a leftover to prune, never a song on the wrong album.
+
+- **Reconcile on relink** (`internal/api/reconcile.go`): relinking a `local` artist to a provider fetches its discography and folds the artist's local albums/tracks in place — albums match by title + year, tracks by title (disc/track number tiebreak). Matches are relinked (owned files preserved), the remainder is created `wanted`, and the artist is set `watched`. The trigger for reconciling a per-album relink is "**local children remain**" (`albumHasLocalTracks`), which covers both promotion and correcting a wrong fuzzy match, and no-ops once everything is linked. Only `local` entities are ever fuzzed. Idempotent.
+- **Manual link = merge, not re-stamp** (`internal/api/manual_link.go`): after reconcile the provider discography is already present, so re-stamping a leftover local album's `provider_id` onto an existing sibling would collide on the unique `(provider, provider_id)` index. Instead, `POST /albums/{id}/link {target_album_id}` **merges** a leftover local album into a sibling (owned files claim matching wanted tracks, tracks the provider doesn't list move over as owned + `local` extras, the emptied shell is deleted); `POST /tracks/{id}/link {target_track_id}` **claims** a wanted track with a local file (deleting the local duplicate). Pickers are scoped to existing siblings / wanted tracks — no provider round-trip.
+- **Surfacing**: a `local` entity is the leftover signal. A `local` artist gets a "not linked" badge in the Library list and a "Not linked to a provider" banner on its page (the `web/src/pages/Library.tsx` badge + `ArtistDetail.tsx` banner). Within a linked artist, a still-`local` album gets an "unmatched" badge and its page shows the same banner + merge picker; a still-`local` track shows a `local` badge + link action.
+
+See [ADR-0007](docs/adr/0007-reconcile-local-import.md).
 
 ## Navidrome Integration
 
@@ -217,6 +229,7 @@ Docker: multi-stage build, builds all three binaries. Alpine runtime. CI: GitHub
 ## Testing
 
 Tests live in:
+
 - `internal/api/handlers_test.go` — API integration tests (100+ tests, includes blacklist/cooldown CRUD, track reject by ID and by name)
 - `internal/activity/activity_test.go` — Activity log unit tests
 - `internal/services/downloader/service_test.go` — Scoring system (tier-based, queue, cooldown filtering, balance invariants), retry delay, pickBestFile, blacklist, stale timeouts, inferExt
@@ -234,6 +247,7 @@ The Lidarr v1 API compatibility shim lives entirely in `internal/api/lidarr.go` 
 ## Docs maintenance
 
 When adding or changing user-facing features (new settings, API endpoints, scoring changes, download behavior), update all three:
+
 1. `README.md` — features list and configuration table
 2. `CLAUDE.md` — technical details for agents (this file)
 3. `site/index.html` and `site/docs.html` — marketing site and documentation
@@ -252,6 +266,7 @@ Design decisions with non-obvious trade-offs are documented as ADRs in `docs/adr
 | [0004](docs/adr/0004-non-destructive-tagging.md) | Tagger | Tagger preserves foreign tags; the `crate:` comment tag was dropped |
 | [0005](docs/adr/0005-recording-id-signal.md) | Importer | MusicBrainz recording id stored as a separate signal (not resolved to release-track) |
 | [0006](docs/adr/0006-music-assistant-integration.md) | Integrations | Music Assistant added alongside Navidrome; mark-bad-from-app via an event-driven reject playlist |
+| [0007](docs/adr/0007-reconcile-local-import.md) | Importer | Promote a local import via a user-anchored artist link that cascades a conservative, local-scoped fuzzy reconcile to albums/tracks; manual album/track link (trigger: local children remain) for the residue |
 
 When making a decision that involves a meaningful trade-off (especially "we tried X but chose Y because Z"), add a new ADR.
 

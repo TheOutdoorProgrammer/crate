@@ -122,9 +122,22 @@ export const api = {
     request<ActivityResponse>(`/activity?limit=${limit}&offset=${offset}`),
   clearCache: () => request<void>('/cache', { method: 'DELETE' }),
   relinkEntity: (type: 'artist' | 'album' | 'track', id: number, providerID: string) =>
-    request<void>(`/relink/${type}/${id}`, {
+    request<{ status: string; reconciling?: boolean }>(`/relink/${type}/${id}`, {
       method: 'POST',
       body: JSON.stringify({ provider_id: providerID }),
+    }),
+
+  // Manual link: merge a leftover local album into a linked sibling album, or
+  // claim a wanted track with an owned local file. See ADR-0007.
+  linkAlbum: (id: number, targetAlbumID: number) =>
+    request<{ status: string; merged_into: number }>(`/albums/${id}/link`, {
+      method: 'POST',
+      body: JSON.stringify({ target_album_id: targetAlbumID }),
+    }),
+  linkTrack: (id: number, targetTrackID: number) =>
+    request<{ status: string; claimed: number }>(`/tracks/${id}/link`, {
+      method: 'POST',
+      body: JSON.stringify({ target_track_id: targetTrackID }),
     }),
 
   searchLibrary: (q: string) =>

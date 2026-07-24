@@ -1021,7 +1021,8 @@
         <li><strong>Tag-based, not path-based</strong> &mdash; folder structure and file names are ignored entirely; only embedded metadata (MP3 ID3, FLAC Vorbis comments) matters. If your library plays correctly in a tag-based server like Navidrome, it will import correctly.</li>
         <li><strong>Dry run first</strong> &mdash; the scan preview reports exactly what an import would add, claim, and skip, without writing anything.</li>
         <li><strong>Non-destructive, always</strong> &mdash; files are never moved, renamed, or modified. Import doesn't apply the naming template to existing files.</li>
-        <li><strong>MusicBrainz tags link automatically</strong> &mdash; libraries tagged by <a href="https://picard.musicbrainz.org/">Picard</a> or beets carry MusicBrainz IDs, and those entities import under the MusicBrainz provider with their real IDs. Everything else imports under the reserved <code>local</code> provider and can be relinked to a real provider anytime (for search, cover art, or new-release watching).</li>
+        <li><strong>MusicBrainz tags link automatically</strong> &mdash; libraries tagged by <a href="https://picard.musicbrainz.org/">Picard</a> or beets carry MusicBrainz IDs, and those entities import under the MusicBrainz provider with their real IDs. Everything else imports under the reserved <code>local</code> provider.</li>
+        <li><strong>Link a local import to reveal what&rsquo;s missing</strong> &mdash; a <code>local</code> artist is flagged &ldquo;not linked&rdquo; in the library. Link it to a provider (you pick the artist &mdash; no risky auto-matching) and Crate pulls the full discography, folds your owned files in (albums matched by title and year, tracks by title, files preserved), and marks the rest wanted. Anything the fuzzy match can&rsquo;t place stays flagged &ldquo;unmatched&rdquo;: from the album page, merge a leftover album into the right release or link a stray file to the track it belongs to. Owned files are only ever re-pointed, never lost.</li>
         <li><strong>Wanted tracks get claimed</strong> &mdash; files matching tracks you already watch flip them to owned instead of leaving them queued for download.</li>
         <li><strong>Quality upgrades apply</strong> &mdash; imported tracks record their real format and bitrate (parsed from the files). Import MP3s with a FLAC-first tier list and the upgrade scanner will gradually replace them, one artist per day. Files outside the library folder are never deleted, even when an upgrade replaces them.</li>
         <li><strong>Idempotent</strong> &mdash; re-running an import skips what it already knows. Files missing artist/album/title tags are skipped and reported with reasons.</li>
@@ -1215,9 +1216,11 @@
           <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>GET</code></td><td><code>/api/providers</code></td><td>List all configured providers with health status.</td></tr>
-            <tr><td><code>POST</code></td><td><code>/api/relink/artist/{id}</code></td><td>Relink an artist to a different provider.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/api/relink/artist/{id}</code></td><td>Relink an artist to a different provider. Relinking a <code>local</code> import reconciles its albums/tracks against the provider discography — owned files preserved, gaps marked wanted.</td></tr>
             <tr><td><code>POST</code></td><td><code>/api/relink/album/{id}</code></td><td>Relink an album to a different provider.</td></tr>
             <tr><td><code>POST</code></td><td><code>/api/relink/track/{id}</code></td><td>Relink a track to a different provider.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/api/albums/{id}/link</code></td><td>Merge a leftover local album into a linked sibling release. Body: <code>{"target_album_id": N}</code>.</td></tr>
+            <tr><td><code>POST</code></td><td><code>/api/tracks/{id}/link</code></td><td>Claim a wanted track with an owned local file. Body: <code>{"target_track_id": N}</code>.</td></tr>
           </tbody>
         </table>
       </div>

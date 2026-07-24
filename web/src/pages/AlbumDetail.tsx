@@ -8,7 +8,7 @@ import FilterBar from '../components/FilterBar';
 import DetailSheet, { DetailRow } from '../components/DetailSheet';
 import ProviderBadge from '../components/ProviderBadge';
 import ProgressBar from '../components/ProgressBar';
-import type { ManualSearchResult, Track } from '../types/index';
+import type { ManualSearchResult, Track, Album } from '../types/index';
 
 export default function AlbumDetail() {
   const { id } = useParams<{ id: string }>();
@@ -29,6 +29,44 @@ export default function AlbumDetail() {
     queryFn: () => api.listDownloads(),
     refetchInterval: 5000,
   });
+
+  // A local album is an unmatched import — load its artist so the user can link
+  // it to one of the sibling releases the reconcile already pulled in.
+  const { data: artistForLink } = useQuery({
+    queryKey: ['artist', album?.artist_id],
+    queryFn: () => api.getArtist(album!.artist_id),
+    enabled: !!album && album.provider === 'local',
+  });
+
+  const linkAlbum = useMutation({
+    mutationFn: (targetAlbumID: number) => api.linkAlbum(Number(id), targetAlbumID),
+    onSuccess: (res) => {
+      toast('Album linked', 'success');
+      queryClient.invalidateQueries({ queryKey: ['artist'] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      navigate(`/album/${res.merged_into}`);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  const linkTrack = useMutation({
+    mutationFn: (vars: { localId: number; targetId: number }) => api.linkTrack(vars.localId, vars.targetId),
+    onSuccess: () => {
+      toast('Track linked', 'success');
+      setLinkTrackId(null);
+      queryClient.invalidateQueries({ queryKey: ['album', id] });
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+
+  const [showAlbumLink, setShowAlbumLink] = useState(false);
+  const [linkTrackId, setLinkTrackId] = useState<number | null>(null);
+
+  const linkSiblings = useMemo(
+    () => (artistForLink?.albums ?? []).filter((a: Album) => a.id !== Number(id) && a.provider !== 'local'),
+    [artistForLink, id]
+  );
 
   const activeTrackIds = new Set(
     downloads
@@ -224,6 +262,11 @@ export default function AlbumDetail() {
     return album.tracks.filter((t) => t.title.toLowerCase().includes(q));
   }, [album, trackFilter]);
 
+  const wantedTracks = useMemo(
+    () => album?.tracks?.filter((t) => t.status === 'wanted') ?? [],
+    [album]
+  );
+
   if (isLoading) {
     return (
       <div className="animate-pulse">
@@ -294,6 +337,49 @@ export default function AlbumDetail() {
         </button>
       </div>
 
+      {album.provider === 'local' && (
+        <div className="bg-amber-900/20 border border-amber-800/40 rounded-lg px-3 py-2.5 mb-4">
+          <div className="flex items-start gap-2.5">
+            <svg className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-amber-300 font-medium">Not linked to a provider</p>
+              <p className="text-[11px] text-amber-300/60">This imported album wasn't auto-matched. Link it to the right release to fill in what's missing.</p>
+            </div>
+            <button
+              onClick={() => setShowAlbumLink((v) => !v)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-800/40 text-amber-200 active:bg-amber-800/60 transition-colors shrink-0"
+            >
+              Link
+            </button>
+          </div>
+          {showAlbumLink && (
+            <div className="mt-2.5 space-y-1 max-h-56 overflow-y-auto">
+              {linkSiblings.length === 0 && (
+                <p className="text-[11px] text-amber-300/60 py-1">No linked releases on this artist yet — link the artist to a provider first.</p>
+              )}
+              {linkSiblings.map((sib: Album) => (
+                <button
+                  key={sib.id}
+                  onClick={() => linkAlbum.mutate(sib.id)}
+                  disabled={linkAlbum.isPending}
+                  className="w-full flex items-center gap-2 bg-zinc-900 rounded-lg p-2 text-left active:bg-zinc-700 transition-colors disabled:opacity-50"
+                >
+                  <div className="w-8 h-8 rounded bg-zinc-700 overflow-hidden shrink-0">
+                    {sib.cover_url && <img src={sib.cover_url} alt="" className="w-full h-full object-cover" onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm truncate">{sib.title}</p>
+                    <p className="text-[10px] text-zinc-500">{sib.year ? `${sib.year} · ` : ''}{sib.tracks?.length ?? 0} tracks</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {stats && stats.totalTracks > 0 && (
         <div className="bg-zinc-800/50 rounded-lg px-3 py-2.5 mb-4 space-y-2">
           <ProgressBar owned={stats.ownedTracks} total={stats.totalTracks} />
@@ -335,6 +421,8 @@ export default function AlbumDetail() {
               const isQueued = activeTrackIds.has(track.id);
               const isSearching = queueTrack.isPending && queueTrack.variables === track.id;
               const isManualOpen = manualSearchTrackId === track.id;
+              const isLocalUnmatched = track.provider === 'local' && album.provider !== 'local';
+              const isLinkOpen = linkTrackId === track.id;
               return (
                 <div key={track.id}>
                   <div className="flex items-center gap-2.5 px-2.5 py-2 border-b border-zinc-800/50 last:border-0 cursor-pointer active:bg-zinc-800/50 transition-colors" onClick={() => setSelectedTrack(track)}>
@@ -358,7 +446,21 @@ export default function AlbumDetail() {
                         </p>
                       )}
                     </div>
-                    {track.status === 'owned' && (
+                    {track.status === 'owned' && isLocalUnmatched && (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setLinkTrackId(isLinkOpen ? null : track.id); }}
+                          className={`shrink-0 transition-colors ${isLinkOpen ? 'text-amber-400' : 'text-amber-500/70 active:text-amber-300'}`}
+                          title="Link to a wanted track"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                          </svg>
+                        </button>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase bg-amber-900/50 text-amber-400">local</span>
+                      </>
+                    )}
+                    {track.status === 'owned' && !isLocalUnmatched && (
                       <>
                         <button
                           onClick={(e) => { e.stopPropagation(); startManualSearch(track.id); }}
@@ -529,6 +631,28 @@ export default function AlbumDetail() {
                           ))}
                         </div>
                       )}
+                    </div>
+                  )}
+                  {isLinkOpen && (
+                    <div className="bg-amber-900/10 border-b border-amber-800/30 px-3 py-2 animate-fade-in">
+                      <p className="text-[11px] text-amber-300/70 mb-1.5">Which release track is this file?</p>
+                      {wantedTracks.length === 0 && (
+                        <p className="text-[11px] text-zinc-500 py-1">No wanted tracks on this album to claim.</p>
+                      )}
+                      <div className="space-y-0.5 max-h-56 overflow-y-auto">
+                        {wantedTracks.map((wt) => (
+                          <button
+                            key={wt.id}
+                            onClick={() => linkTrack.mutate({ localId: track.id, targetId: wt.id })}
+                            disabled={linkTrack.isPending}
+                            className="w-full text-left rounded-lg px-2.5 py-1.5 bg-zinc-800/50 active:bg-zinc-700 transition-colors disabled:opacity-50"
+                          >
+                            <p className="text-[11px] truncate">
+                              <span className="text-zinc-500 tabular-nums mr-1.5">{wt.track_number}</span>{wt.title}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

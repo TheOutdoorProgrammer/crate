@@ -427,6 +427,31 @@ func (q *Queries) UpdateTrackDownloadedFrom(id int64, username string) error {
 	return err
 }
 
+// GetTrack loads one track by id, including its mb_recording_id — used by the
+// manual "this local file is that track" claim so the recording id carries over.
+func (q *Queries) GetTrack(id int64) (*models.Track, error) {
+	t := &models.Track{}
+	err := q.db.QueryRow(
+		`SELECT id, album_id, title, track_number, disc_number, duration_ms, provider, provider_id,
+		        status, file_path, downloaded_from, downloaded_filename, download_format, download_bitrate,
+		        mb_recording_id, created_at, updated_at
+		 FROM tracks WHERE id = ?`, id,
+	).Scan(&t.ID, &t.AlbumID, &t.Title, &t.TrackNumber, &t.DiscNumber, &t.DurationMs,
+		&t.Provider, &t.ProviderID, &t.Status, &t.FilePath, &t.DownloadedFrom, &t.DownloadedFilename,
+		&t.DownloadFormat, &t.DownloadBitrate, &t.MBRecordingID, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// UpdateTrackAlbum reparents a track to a different album — used when merging a
+// local album into a linked one moves over a track the provider doesn't list.
+func (q *Queries) UpdateTrackAlbum(id, albumID int64) error {
+	_, err := q.db.Exec(`UPDATE tracks SET album_id = ?, updated_at = ? WHERE id = ?`, albumID, now(), id)
+	return err
+}
+
 func (q *Queries) UpdateTrackDownloadedFilename(id int64, filename string) error {
 	_, err := q.db.Exec(`UPDATE tracks SET downloaded_filename = ?, updated_at = ? WHERE id = ?`,
 		filename, now(), id)

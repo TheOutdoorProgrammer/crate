@@ -173,6 +173,11 @@ function ArtistRow({ artist, matchCount, isTrackMatch }: { artist: Artist; match
           </div>
         )}
       </div>
+      {artist.provider === 'local' && (
+        <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase shrink-0 bg-amber-900/50 text-amber-400">
+          not linked
+        </span>
+      )}
       {artist.orphaned && (
         <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase shrink-0 bg-red-900/50 text-red-400">
           orphaned

@@ -1022,12 +1022,36 @@ func (s *Server) handleRelinkEntity(w http.ResponseWriter, r *http.Request) {
 
 	path := r.URL.Path
 	var err2 error
+	reconciling := false
 	switch {
 	case strings.Contains(path, "/relink/artist/"):
-		err2 = s.queries.RelinkArtist(id, primary, req.ProviderID)
+		// Capture the pre-relink provider: only promoting a local import runs the
+		// discography reconcile. A real→real swap stays a plain re-stamp.
+		prev, _ := s.queries.GetArtist(id)
+		if err2 = s.queries.RelinkArtist(id, primary, req.ProviderID); err2 == nil &&
+			prev != nil && prev.Provider == provider.LocalProvider {
+			_ = s.queries.UpdateArtistStatus(id, models.ArtistStatusWatched)
+			reconciling = true
+			providerID := req.ProviderID
+			s.bgWork.Add(1)
+			go func() {
+				defer s.bgWork.Done()
+				s.reconcileLocalArtist(primary, id, providerID)
+			}()
+		}
 	case strings.Contains(path, "/relink/album/"):
-		err2 = s.queries.RelinkAlbum(id, primary, req.ProviderID)
+		if err2 = s.queries.RelinkAlbum(id, primary, req.ProviderID); err2 == nil &&
+			s.albumHasLocalTracks(id) {
+			reconciling = true
+			albumID, providerID := id, req.ProviderID
+			s.bgWork.Add(1)
+			go func() {
+				defer s.bgWork.Done()
+				s.reconcileAlbumTracks(context.Background(), primary, albumID, providerID)
+			}()
+		}
 	case strings.Contains(path, "/relink/track/"):
+		// A track is a leaf — nothing to reconcile beneath it.
 		err2 = s.queries.RelinkTrack(id, primary, req.ProviderID)
 	default:
 		writeError(w, http.StatusBadRequest, "invalid relink target")
@@ -1039,7 +1063,7 @@ func (s *Server) handleRelinkEntity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "relinked"})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "relinked", "reconciling": reconciling})
 }
 
 // Settings

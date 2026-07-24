@@ -107,6 +107,7 @@ func (s *Server) setupRouter() chi.Router {
 		r.Route("/albums", func(r chi.Router) {
 			r.Get("/{id}", s.handleGetAlbum)
 			r.Post("/{id}/queue", s.handleQueueAlbumTracks)
+			r.Post("/{id}/link", s.handleLinkAlbum)
 			r.Put("/{id}/ignore", s.handleIgnoreAlbum)
 			r.Delete("/{id}/ignore", s.handleUnignoreAlbum)
 			r.Delete("/{id}", s.handleUnwatchAlbum)
@@ -116,6 +117,7 @@ func (s *Server) setupRouter() chi.Router {
 			r.Post("/reject", s.handleRejectTrackByName)
 			r.Delete("/{id}", s.handleUnwatchTrack)
 			r.Post("/{id}/queue", s.handleQueueTrack)
+			r.Post("/{id}/link", s.handleLinkTrack)
 			r.Post("/{id}/search", s.handleStartManualSearch)
 			r.Get("/{id}/search/{searchId}", s.handlePollManualSearch)
 			r.Delete("/{id}/search/{searchId}", s.handleDeleteManualSearch)
