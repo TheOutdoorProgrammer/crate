@@ -11,7 +11,7 @@ require (
 	github.com/go-flac/go-flac v1.0.0
 	github.com/pressly/goose/v3 v3.27.1
 	golang.org/x/time v0.15.0
-	google.golang.org/grpc v1.81.1
+	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.50.1
 )
