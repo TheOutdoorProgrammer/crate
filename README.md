@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  Self-hosted music manager. Search for artists via pluggable providers (MusicBrainz, Deezer, or custom gRPC), watch their discographies, and automatically download via <a href="https://github.com/slskd/slskd">slskd</a> (Soulseek). Optional <a href="https://www.navidrome.org/">Navidrome</a> and <a href="https://www.music-assistant.io/">Music Assistant</a> integrations trigger a library scan/sync so new music appears immediately — and with Music Assistant you can mark a track bad right from the app. Mobile-first UI.
+  Self-hosted music manager. Search for artists via pluggable providers (MusicBrainz, Deezer, or custom gRPC), watch their discographies, and automatically download via <a href="https://github.com/slskd/slskd">slskd</a> (Soulseek). Optional <a href="https://www.navidrome.org/">Navidrome</a> and <a href="https://www.music-assistant.io/">Music Assistant</a> integrations trigger a library scan/sync so new music appears immediately — and with Music Assistant you can mark a track bad right from the app. Mobile-first UI.<br /><br />Docs: <a href="https://runcrate.dev/">runcrate.dev</a><br /><br />
 </p>
 
 <p align="center">
