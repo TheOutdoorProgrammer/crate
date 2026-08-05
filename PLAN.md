@@ -1,8 +1,13 @@
 # Crate v2 — The Music Orchestrator
 
-> **Status:** revision 7 — rewritten against a twelve-section audit. See [`FINDINGS.md`](FINDINGS.md)
-> for the evidence: ~30 defects in shipped v1 code, ~20 corrections to earlier revisions of this
-> plan, and the contract gaps that produced this rewrite.
+> **Status:** revision 8.
+> Revision 7 was rewritten against a twelve-section audit; revision 8 answers a thirteenth, adversarial review of the whole.
+> See [`FINDINGS.md`](FINDINGS.md) for the evidence: ~30 defects in shipped v1 code, ~20 corrections to earlier revisions of this plan, and the contract gaps behind the rewrite.
+>
+> **What changed in 8:** provider locality became probe-gated instead of categorical, which is what makes the community story real rather than nominal.
+> The state model ships alone, ahead of the sleeve extraction.
+> The `status → (watch_state, ingest_state)` mapping is decided, and `tracks.status` is dropped.
+> Issue #12 is no longer claimed as closed by the FLAC fix — it isn't.
 >
 > **v2 is a true major release.** Nothing is preserved for compatibility's sake. Migration from v1
 > is best-effort and **one-way** — which makes the pre-migration database backup load-bearing, not
@@ -75,10 +80,14 @@ Third-party providers may do whatever they want. This is a standard we hold ours
 
 **This is the biggest single change in v2, and it's a redesign rather than an extension.**
 
-`tracks.status` currently conflates three orthogonal things: watch intent (`wanted`/`ignored`),
-acquisition progress (`downloading`), and possession (`owned`). v2 needs to add
-possession-without-placement, possession-without-location, and pending-removal — and the audit found
-**three different predicates with three different memberships** already straining against one enum.
+`tracks.status` currently conflates three orthogonal things: watch intent (`wanted`/`ignored`), acquisition progress (`downloading`), and possession (`owned`).
+v2 needs to add possession-without-placement, possession-without-location, and pending-removal — and the audit found **three different predicates with three different memberships** already straining against one enum.
+
+**The clinching evidence is a v1 bug, not a v2 requirement.**
+During a quality upgrade, `scanForUpgrades` sets an owned track to `wanted` while its file is still on disk.
+For that entire window crate is lying about possession: progress bars dip, Lidarr reports `hasFile: false`, the integrity check skips the file, and an upgrade that exhausts its retries strands the track `wanted`-with-a-file forever.
+**One enum physically cannot hold "I have this" and "I'm getting a better one" at the same time.**
+That's not a v2 problem being designed around — it's a v1 defect the current model cannot express its way out of.
 
 So split the axes.
 
@@ -201,8 +210,9 @@ citations in [`FINDINGS.md`](FINDINGS.md#ship-now--v1-bugs).
 - **slskd's `DownloadFileComplete` webhook** — slskd already knows the local path; wiring it deletes
   `findFile`'s basename collision, the `track.FilePath` in-memory hack, and the downloads-dir
   must-match constraint
-- **`flac.ParseFile` → `ParseMetadata`** — reading one comment currently pulls the whole file through
-  RAM, and the fix also closes issue #12
+- **`flac.ParseFile` → `ParseMetadata`** — reading one comment currently pulls the whole file through RAM
+- **Issue #12 properly.** An earlier revision claimed `ParseMetadata` closes it. It does not. The issue has three distinct failure classes: ID3v2-prefixed FLAC (9 of 16 skips, needs an ID3-skip shim before `go-flac`), ID3v2.2 MP3s (`bogem/id3v2` doesn't support them), and the sync-code error (2 files). `ParseMetadata` fixes only the third. Ship the FLAC change alone and close #12, and the reporter's actual complaint — 11 of 13 files — is still broken.
+- **The upgrade-window ownership lie.** `scanForUpgrades` flips an owned track to `wanted` while its file is still on disk. For the whole window progress dips, Lidarr reports `hasFile: false`, and the integrity check skips it — and an upgrade that exhausts its retries strands the track `wanted`-with-a-file permanently. This is a v1 bug in its own right and it's also the sharpest argument for the state model below.
 - **`mergeAlbum` drops `mb_recording_id`**, and has no transaction
 - **`copyFile` leaves a truncated destination**; **`tagWAV` truncates in place**
 - **Relink ignores the chosen provider**; **settings save rewinds the upgrade scanner**
@@ -271,9 +281,13 @@ invert, not during.
 - **`crate-notify-webhook`** — ~60 new lines, and it serves the long tail (Jellyfin, Plex, Emby,
   n8n, a shell script) that a gRPC-only contract would strand.
 
-Navidrome alone wouldn't prove the contract; a second *shape* does. And webhook can't replace
-Navidrome, because Navidrome's auth is `md5(password + fresh salt)` per call — no static URL
-expresses that.
+Navidrome alone wouldn't prove the contract; a second *shape* does.
+And webhook can't replace Navidrome, because Navidrome's auth is `md5(password + fresh salt)` per call — no static URL expresses that.
+
+**The webhook is the documented third-party path, and that should be stated rather than left implicit.**
+A shell script can receive a webhook; it cannot implement a gRPC service.
+So the gRPC notification contract exists for providers that genuinely need a long-lived process — Music Assistant's persistent websocket is the only current example — and everyone else points the webhook at whatever they want.
+Nobody should implement a gRPC notifier to trigger a rescan, and the docs should say so.
 
 **Music Assistant stays in-tree through phase 7.** Its notifier and reject watcher share one
 websocket; splitting them across processes means two MA connections. The reject watcher is also
@@ -292,10 +306,13 @@ never blocking.** Crate doesn't care if a notify fails — but the user does, so
 
 **Ledger-mode passthrough is the conformance canary, and it ships before sleeve.**
 
-It exercises every RPC in ~150 lines with zero state-machine risk: `Place` returns the source path,
-`Resync` reports nothing, `Identify` reads tags, `Remove` refuses. Running the contract against a
-provider that *refuses to place anything* proves the contract doesn't assume placement — while
-changing the proto is still free.
+It exercises every RPC in ~150 lines with zero state-machine risk: `Place` returns the source path, `Resync` reports nothing, `Identify` reads tags, `Remove` refuses.
+Running the contract against a provider that *refuses to place anything* proves the contract doesn't assume placement — while changing the proto is still free.
+
+**It is built and conformance-tested here, not yet selectable.**
+Passthrough produces `staged`, which doesn't exist until phase 4, and the in-process organizer is still the live ingest path throughout this phase.
+That's the point: the contract gets exercised by a real second implementation before either the state model or the extraction is at risk.
+It becomes a selectable provider in phase 5, once both have landed.
 
 ### Methods
 
@@ -442,14 +459,20 @@ mistake that cannot be recovered from once third parties exist.
 
 ---
 
-## Phase 4 — `sleeve` + the state model
+## Phase 4 — the state model
 
-**The big one, and it ships as one unit.** You cannot extract the organizer without moving
-ownership, because the last line of the organizer *is* the ownership write.
+**Ships alone, with everything still in-process.**
 
-`crate-ingest-sleeve` is crate's existing tagger + organizer + naming, extracted behind the
-contract. Behavior-identical for file layout and tag bytes — which is what makes migration
-tractable — with five forced changes, all documented in FINDINGS.
+An earlier revision bundled this with the sleeve extraction, on the reasoning that you can't extract the organizer without moving ownership — the last line of the organizer *is* the ownership write.
+That's true, and it proves the *extraction* must include the ownership write.
+It does not prove the state-model redesign and the extraction must ship in the same release.
+
+The audit's strongest convergent finding — five reviewers — was that every phase bundled a cheap reversible half with an expensive irreversible one.
+Revision 7 applied that to phases 1, 3, 5 and 6 and left it standing in the one phase that needed it most.
+So: land the schema migration and the two-axis model with the organizer still in-process writing `ingest_state` directly.
+If something breaks, you know it was the migration.
+
+This is the riskiest change in the repo's history — it touches every existing user's database — and it should not share a release with anything.
 
 ### Migration
 
@@ -470,6 +493,31 @@ CREATE UNIQUE INDEX idx_tracks_ingest_ref ON tracks(ingest_provider, ingest_ref)
 The unique index matters: two rows can already share a `file_path` today (crash mid-merge, no
 transaction). Under v2 that's two rows sharing a ref, and rejecting either **destroys the other's
 file**.
+
+#### The status mapping
+
+Every v1 row needs a `(watch_state, ingest_state)`, and the `owned` case is the one that looked unanswerable:
+
+| v1 `status` | `watch_state` | `ingest_state` |
+| --- | --- | --- |
+| `wanted` | `wanted` | `NULL` |
+| `downloading` | `wanted` | `NULL` — the `download_queue` row carries in-flight |
+| `ignored` | `ignored` | `NULL` |
+| `owned` | `wanted` | set by adoption (see below) |
+
+The objection to mapping `owned → wanted` is that a track imported from a never-watched artist gets an acquisition intent no human expressed.
+**That objection dissolves once you look at which axis actually gates acquisition.**
+`Missing` is `watch_state = wanted AND ingest_state IS NULL`, so an imported track is never Missing and never queued.
+If it later goes `lost`, it's still not Missing — `lost` is not `NULL`.
+**Only an explicit human action clears `ingest_state`**, and that is exactly the "never re-acquire on an inference" invariant doing its job.
+
+Safety lives on the `ingest_state` axis, not the `watch_state` axis.
+`watch_state` means "would I want this if I didn't have it," which is `wanted` for anything short of an explicit ignore.
+
+#### `tracks.status` is dropped
+
+Not frozen, not dual-written.
+Migration is one-way and the pre-`goose.Up` backup is the rollback path, so a column kept alive solely for a rollback we've declared unsupported is dead weight that will drift.
 
 **Do not backfill refs in SQL.** Crate doesn't know which ingest provider the user will configure,
 the migration can't verify files exist, and `file_path` is *relative when crate placed it, absolute
@@ -511,7 +559,20 @@ Plus the destroy-before-create test, table-driven over every failure mode `Place
 
 ---
 
-## Phase 5 — `passthrough` find mode + recovery
+## Phase 5 — extract `sleeve`
+
+`crate-ingest-sleeve` is crate's existing tagger + organizer + naming, moved behind the contract proven in phase 3, against the state model landed in phase 4.
+
+Behavior-identical for file layout and tag bytes — which is what keeps this boring — with five forced changes, all documented in FINDINGS.
+The ownership write moves with it: the organizer's last line becomes crate persisting the ref that `Place` returned.
+
+`passthrough` becomes selectable in this phase, since `staged` now exists and the contract now has a live consumer.
+
+The destroy-before-create test lands here, table-driven over every failure mode `Place` can produce.
+
+---
+
+## Phase 6 — `passthrough` find mode + recovery
 
 Two tracking modes, not three. **`find` is the default** — the population that selects passthrough
 is by definition the population running an external tool.
@@ -561,18 +622,18 @@ The freeform path input is **cut** — phone-hostile, desktop-only value, covere
 
 ---
 
-## Phase 6 — DownloadProvider
+## Phase 7 — DownloadProvider
 
-Split in two, because the hard part (drawing the line) is fully separable from the risky part
-(crossing a process boundary).
+Split in two, because the hard part (drawing the line) is fully separable from the risky part (crossing a process boundary).
 
-**6a — a Go interface, in-process.** `downloader.Service` depends on the interface instead of
-`*slskd.Client`. Split candidate scoring at the availability/policy line. Move slskd config out of
-env and into provider config. **~80% of the value at ~10% of the risk**, shippable as an RC on its
-own, and it makes the `download_claim` design concrete before ingest is built against it.
+**7a — a Go interface, in-process.**
+`downloader.Service` depends on the interface instead of `*slskd.Client`.
+Split candidate scoring at the availability/policy line.
+Move slskd config out of env and into provider config.
+**~80% of the value at ~10% of the risk**, shippable as an RC on its own, and it makes the `download_claim` design concrete before ingest is built against it.
 
-**6b — gRPC behind that interface.** Last, as planned. By then the interface has been exercised for
-months.
+**7b — gRPC behind that interface.**
+Last, as planned. By then the interface has been exercised for months.
 
 ### Policy vs protocol
 
@@ -603,7 +664,7 @@ the ADR rather than discovering it.
 
 ---
 
-## Phase 7 — Music Assistant
+## Phase 8 — Music Assistant
 
 The notifier and the reject watcher move together, after the state model has settled.
 
@@ -623,7 +684,7 @@ have a provider POSTing into a login page.
 
 ---
 
-## Phase 8 — Lidarr shim
+## Phase 9 — Lidarr shim
 
 The shim stays confined to `lidarr.go` and the principle holds: **crate's core is never reshaped to
 accommodate Lidarr.** Coverage expansion becomes a real goal — every Lidarr-compatible client that
@@ -635,14 +696,14 @@ the album permanently incomplete and possibly re-search; `true` claims a file cr
 
 ---
 
-## Phase 9 — Config schema + UI
+## Phase 10 — Config schema + UI
 
 `GetConfigSchema` and dynamic form rendering, designed **after** sleeve, passthrough and slskd have
 real field lists. Field types drawn from the actual inventory: `STRING`, `SECRET`, `PATH`, `URL`,
 `INT`, `ENUM`, plus a list type for `library_roots` and conditional visibility for mode-dependent
 fields. `BOOL` and `TEXT` have zero users and don't ship.
 
-### The frontend is not phase 9 alone
+### The frontend is not phase 10 alone
 
 The audit's sharpest structural finding: **UI acceptance criteria belong inside each phase**, not in
 a trailing docs phase. Two phases here define their own success in UI terms — "crate renders them,"
@@ -662,24 +723,54 @@ just resumes.
 
 ## Provider locality
 
-**All first-party providers ship in the same image and are spawned as child processes.** Filesystem
-locality is preserved by construction; the repo layout is a source concern.
+Probe-gated, not categorical.
 
-The constraint matters for **external** providers, and it must be written into `PROVIDERS.md`, which
-today advertises `external:host:port` with no caveat:
+**First-party providers ship in one image for packaging convenience.**
+They are still separate processes speaking gRPC over an address, exactly as v1's catalog providers already are.
+One image is a distribution choice, not an architectural one — and nothing about it privileges first-party providers over anyone else's.
 
-| Kind | External? |
+**A third-party provider runs in its own image.**
+`CRATE_PROVIDERS=name:external:host:port` already supports this today; it needs no code change and no fork.
+
+### The real constraint is the filesystem, and only for ingest
+
+`Place` takes a path, `Resolve` returns one, and `Identify`/`Resync`/`Search` walk directories.
+So an ingest provider must resolve the same paths to the same bytes as crate.
+That is a **deployment** requirement, not a topology one:
+
+| Deployment | Ingest works? |
 | --- | --- |
-| Catalog | ✅ pure API client |
-| Notification | ✅ pure network client |
-| Download | ⚠️ with a documented mount contract |
-| **Ingest** | ❌ **refused at startup** |
+| Same image, child process | ✅ |
+| **Separate container, same host, same volume at the same mount path** | ✅ — this is the third-party shape |
+| Separate host | ❌ — no shared filesystem |
 
-`Place` takes a path and returns a location. A remote ingest provider stat-ing `/app/downloads/x.flac`
-either finds nothing or finds a *different* file. Byte streaming was considered and rejected: it
-helps exactly one of four RPCs (`Identify`, `Resync` and `Search` are filesystem walks by nature),
-it would require crate to open files — violating its own boundary — and shared storage is already
-v1's documented, load-bearing assumption at the crate↔slskd boundary.
+An earlier revision refused external ingest providers categorically.
+**That was wrong**: it banned the middle row to prevent the bottom one, which is exactly the case a community provider would use.
+
+**`CheckAccess` is the gate.**
+It doesn't care about images, hosts, or who wrote the provider — it writes a token file and asks the provider to read it back.
+Same-host-different-container passes; different-host fails, loudly, at registration rather than silently per-track.
+
+> **External ingest providers are allowed. Registration fails if `CheckAccess` fails.**
+
+The same probe covers the download→ingest handoff, where three parties (the download provider, crate, and the ingest provider) must agree on paths.
+That is already a load-bearing assumption at the crate↔slskd boundary in v1, and documented nowhere.
+
+Byte streaming was considered and rejected.
+It helps exactly one of four ingest RPCs — the other three are filesystem walks by nature — and it would require crate to open files, violating its own boundary.
+
+### What a third party actually needs
+
+This is the point of the contract, so it has to be real rather than nominal:
+
+- **A conformance suite** they can run their provider against — `crate-proto/conformance`, exporting `RunIngest(t, addr)` and friends. Crate's own tests call it in-process; a `crate-conformance` binary dials any address.
+- **A documented sidecar shape** — a compose snippet showing the shared volume at a matching mount path, and `CRATE_PROVIDERS` pointing at it.
+- **`PROVIDERS.md` rewritten.** It currently advertises `external:host:port` with no caveat at all, documents 5 RPCs when the proto has 6, and says nothing about locality.
+
+**The beets case is the proof.**
+Crate ships no beets provider — the research showed its writer destroys the tags ADR-0004 exists to protect.
+But someone who knows beets better than we do can ship `crate-ingest-beets` as their own Python image, run it as a sidecar, and pass `CheckAccess`.
+That is a better outcome than us maintaining a Python runtime we'd be on the hook for.
 
 ---
 
@@ -694,7 +785,8 @@ What ships instead: **`proto/` as a nested Go module** (phase 0), which solves t
 the major-version path break — permanently and for free.
 
 Revisit the split when there's a forcing function: a non-Go provider, an outside maintainer, or
-genuinely divergent release cadence. Until then, `PLAN.md`'s phase 8 is docs and rebrand only.
+genuinely divergent release cadence.
+Until then there is no repo-split phase at all — docs and rebrand ride along with the phase that changes the thing being documented.
 
 ---
 
@@ -704,28 +796,30 @@ genuinely divergent release cadence. Until then, `PLAN.md`'s phase 8 is docs and
 | --- | --- | --- |
 | **0** | Release pipeline, proto module + buf, v1 bug fixes, test foundation | v1.x |
 | **1** | Kind-aware registry, config transport, harness seam | v1.x |
-| **2** | NotificationProvider — navidrome + webhook | v2.0.0-rc |
-| **3** | Ingest contract + passthrough (ledger) — the conformance canary | v2.0.0-rc |
-| **4** | sleeve + the state model + migration | v2.0.0-rc |
-| **5** | passthrough find mode, `staged`/`lost`, recovery | v2.0.0-rc |
-| **6a** | DownloadProvider as an in-process interface | v2.0.0-rc |
-| **6b** | DownloadProvider over gRPC | v2.0.0-rc |
-| **7** | Music Assistant moves out | v2.0.0-rc |
-| **8** | Lidarr shim expansion | v2.0.0-rc |
-| **9** | Config schema + the UI it unblocks | v2.0.0 |
+| **2** | NotificationProvider — navidrome + webhook | v1.x |
+| **3** | Ingest contract + passthrough (ledger), built and conformance-tested, not yet selectable | v1.x |
+| **4** | **The state model + migration.** Alone. | v2.0.0-rc |
+| **5** | Extract sleeve; passthrough becomes selectable | v2.0.0-rc |
+| **6** | passthrough find mode, `lost` recovery | v2.0.0-rc |
+| **7a** | DownloadProvider as an in-process interface | v2.0.0-rc |
+| **7b** | DownloadProvider over gRPC | v2.0.0-rc |
+| **8** | Music Assistant moves out | v2.0.0-rc |
+| **9** | Lidarr shim expansion | v2.0.0-rc |
+| **10** | Config schema + the UI it unblocks | v2.0.0 |
 
-Phases 0 and 1 ship on v1 and are valuable on their own. **The first v2 tag comes after the proto
-module lands**, without exception.
+**Phases 0 through 3 all ship on v1** and are valuable on their own — the bug fixes, the release pipeline, the webhook notifier, and a contract exercised by a real second implementation, none of which require a breaking change.
+**The first v2 tag is the state-model migration**, and it comes after the proto module lands, without exception.
 
-Every phase carries its own UI acceptance criteria and its own test artifacts. Phases 3 and 4 are
-where the conformance suite earns its keep — one suite run against two deliberately opposite
-providers is how you find placement assumptions before they calcify.
+Every phase carries its own UI acceptance criteria and its own test artifacts.
+Phases 3 and 5 are where the conformance suite earns its keep — one suite run against two deliberately opposite providers is how you find placement assumptions before they calcify.
 
 ---
 
 ## ADRs to write
 
-- The two-axis state model — why `status` was split and what `owned` became
+- **Process boundary vs in-process interface** — the foundational decision of this plan, and the one it kept making implicitly. Context must include the honest history: the ingest contract was originally justified by hosting wrtag and beets, both of which our own research then disqualified. The decision survives on the community argument — a third party who knows beets better than we do can ship a provider — which is only true because locality is probe-gated rather than banned. Write down what would falsify it: if no external provider exists a year after v2, the boundary was speculative and the interfaces should collapse inward.
+- **One repo, nested proto module** — why the module split solves the major-version break and the repo split solves nothing that exists yet.
+- The two-axis state model — why `status` was split, what `owned` became, and why the upgrade window made it unavoidable
 - Ingest as a provider — why crate exited the tagging and organizing business
 - Why crate ships no third-party ingester — wrtag can't place partial releases, beets destroys foreign tags
 - First-party providers never parse CLI output
@@ -734,8 +828,9 @@ providers is how you find placement assumptions before they calcify.
 - Place before Remove, always — and the same-path guard
 - Two claims in, one verdict out — and why the verdict doesn't overwrite catalog identity
 - Inbound provider events over crate's HTTP API
-- Provider locality — which kinds may run remotely, and why ingest may not
+- Provider locality — probe-gated rather than categorical, and why `CheckAccess` is the right gate
 - DownloadProvider is an extraction, not a pluggability story
+- `tracks.status` is dropped rather than dual-written, and what that costs
 
 ---
 
