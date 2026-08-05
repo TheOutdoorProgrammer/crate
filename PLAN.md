@@ -1,19 +1,20 @@
 # Crate v2 — The Music Orchestrator
 
-> **Status:** draft for review, revision 5. Leave inline comments.
+> **Status:** revision 6 — design settled, nothing blocking. Leave inline comments.
 >
-> **⚠️ One pushback — [ingest verdict as source of truth](#the-ingest-verdict-is-a-signal-not-a-replacement).
-> You already wrote an ADR that says don't do this. Overrule me if you disagree.**
->
-> **🔬 Research in flight** on the default ingest provider — that section is marked and will change.
+> Every open question from revisions 1–5 is resolved. Research verdicts on the tools we evaluated
+> and rejected are recorded in
+> [Research findings](#research-findings--recorded-so-nobody-re-litigates) so nobody re-opens them,
+> and [Known gaps](#known-gaps-deliberately-carried) records what we're carrying on purpose.
 
 ## The thesis
 
-Crate v1 tried to do everything: find music, download it, tag it, organize it, tell other apps about it.
-It's mediocre at the last three because they aren't the point.
+Crate v2 does one thing: **it decides what music you should have, and orchestrates the pieces that
+get it there.** Catalog, download, ingest, and notification all move behind gRPC provider contracts.
 
-Crate v2 does one thing: **it decides what music you should have, and orchestrates the tools that get it there.**
-Everything else becomes a provider.
+The contracts are public and documented. **What we *ship* is only what we can maintain ourselves** —
+no bundled third-party tools, no wrapped CLIs, no foreign runtimes in the required path. Anyone can
+write a provider for anything; that's the point of a contract.
 
 ```mermaid
 graph TD
@@ -25,8 +26,8 @@ graph TD
     M --> M1[musicbrainz]
     M --> M2[deezer]
     D --> D1[slskd]
-    I --> I1[wrtag]
-    I --> I2[beets]
+    I --> I1[sleeve - default]
+    I --> I2[passthrough]
     N --> N1[navidrome]
     N --> N2[music assistant]
 ```
@@ -39,90 +40,73 @@ fighting over the same file.
 | Layer | Owns | Never |
 | --- | --- | --- |
 | **Crate** | State, the watch/wanted machine, the scheduler, user policy (quality tiers, negative keywords, upgradeability), the UI | Touches a file |
-| **CatalogProvider** | What exists in the world — search, discographies, what you're missing, what to go look for | Touches a file. Its metadata is for *finding* music, not for tagging it. |
+| **CatalogProvider** | What exists in the world — search, discographies, what you're missing, what to go look for | Touches a file. Its metadata is for *finding* music, not tagging it. |
 | **DownloadProvider** | Getting the bytes — protocol, peers, availability, transfer state | Decides *which* file is good enough. That's policy. |
-| **IngestProvider** | **Everything about the file on disk** — tags, cover art, path, layout, format | Writes to crate's database |
+| **IngestProvider** | **Everything about the file on disk** — tags, cover art, path, layout | Writes to crate's database |
 | **NotificationProvider** | Telling downstream apps something changed | Anything else |
 
 The one that's easy to get wrong: **catalog providers are search providers.** MusicBrainz and Deezer
 tell crate what a discography contains and what to hunt for. They are *not* the source of truth for
 what gets written into a file's tags — that's entirely the ingest provider's call.
 
-> **Naming:** `MetadataProvider` is now actively misleading, since the ingest provider is the one
-> that owns file metadata. Proposing **`CatalogProvider`**. Alternative: `SearchProvider`.
-> Renaming now is cheap; renaming after third parties write providers isn't.
-
-## Providers are language-agnostic
-
-gRPC doesn't care what's on the other end. A provider is any process that speaks the contract —
-Go, Python, Rust, whatever fits the tool it wraps.
-
-This matters most for **beets: the provider is written in Python and imports beets directly.** No
-shelling out, no PTY scraping, no parsing CLI output, no `beet import -q` and its silent skips.
-`grpcio` + generated stubs, and the provider calls `beets.library` in-process.
-
-Consequences:
-
-- beets' Python API is explicitly internal — the maintainers state there are no stability
-  guarantees. The provider pins a beets version and tests against it. That's exactly the kind of
-  risk an isolated satellite repo is designed to contain.
+> **Naming:** `MetadataProvider` becomes **`CatalogProvider`** in v2. "Metadata" now collides with
+> what ingest providers own, and renaming is cheap before third parties write against the contract.
 
 ## First-party providers never shell out
 
-**Rule: a first-party provider never invokes a CLI per operation and parses its output.** It talks
-to its tool through a library, an in-process runtime, or a real protocol.
+**Rule: no `exec.Command` in any repo we own. No exceptions.**
 
-The ban is on *output parsing*, not on process management. Crate already spawns provider binaries
-and talks gRPC to them — `ProcessManager` is the existing precedent and it's fine. The distinction:
+This used to need an exception policy. It doesn't anymore — **the rule was only ever hard because we
+were wrapping other people's CLIs.** Once we only ship what we control, it costs nothing. That's the
+reason it can be absolute, and it's worth recording so a future session reads it as a consequence
+rather than dogma.
+
+The ban is on *output parsing*, not process management. Crate already spawns provider binaries and
+talks gRPC to them — `ProcessManager` is the existing precedent and it's fine.
 
 | Pattern | Verdict |
 | --- | --- |
 | Import the library, call functions | ✅ |
 | In-process runtime (wasm, embedded interpreter) | ✅ |
-| Start a long-lived server, speak HTTP/gRPC to it | ✅ — this is what crate does today |
+| Start a long-lived server, speak HTTP/gRPC to it | ✅ — what crate does today |
 | `exec` per operation, parse stdout / check exit codes | ❌ |
 | Drive an interactive prompt | ❌❌ |
 
-Why: arg escaping, no type safety, exit codes that lie, output formats that were never contracts,
-and debugging that collapses the moment anything goes wrong. betanin is the cautionary tale —
-454 stars, and it drives beets by spawning it in a pseudo-terminal and regex-matching *truncated*
-prompt fragments to dodge terminal line-wrap.
-
-**Third-party providers can do whatever they want.** The contract doesn't care. This is a standard
-we hold ourselves to, not one we impose.
-
-### Exceptions, if it comes to that
-
-If a tool we genuinely need has no library, runtime, or protocol surface, we take an exception
-rather than abandon the tool — but we take it on the record:
-
-1. It's written down in an ADR: which tool, why no other path exists, what the failure modes are
-2. It lives **only** in the satellite provider repo — crate core never shells out, no exceptions
-3. It carries an **exit condition** — if upstream ever ships a library or API, we migrate
-4. It's a decision, not a default. One tool, one ADR, not a blanket carve-out.
+**Third-party providers can do whatever they want.** The contract doesn't care. This is a standard we
+hold ourselves to, not one we impose. betanin is the cautionary tale for why — 454 stars, and it
+drives beets by spawning it in a pseudo-terminal and regex-matching *truncated* prompt fragments to
+dodge terminal line-wrap.
 
 ## Scope
+
+### Moved, not deleted
+
+| Package | Becomes |
+| --- | --- |
+| `internal/services/tagger` | `crate-ingest-sleeve` |
+| `internal/services/organizer` | `crate-ingest-sleeve` |
+| `internal/naming` | `crate-ingest-sleeve` |
+| `internal/services/importer` (the tag-scan half) | `Identify`, implemented by both providers |
 
 ### Deleted
 
 | Package | Replaced by |
 | --- | --- |
-| `internal/services/tagger` | IngestProvider |
-| `internal/services/organizer` | IngestProvider |
-| `internal/services/importer` | IngestProvider (`Identify`) + crate-side reconciliation |
-| `internal/naming` | IngestProvider (the ingest tool owns path templates) |
 | `internal/services/navidrome` | NotificationProvider |
 | `internal/services/musicassistant` | NotificationProvider + crate HTTP API for inbound |
 | `internal/services/slskd` (as a hardcoded dependency) | DownloadProvider |
-| `scheduler.checkFileIntegrity` | IngestProvider `Resync` |
 
-No compatibility shims. No built-in fallback provider. v2 is a clean break.
+### Stays in crate
+
+The **reconciliation** half of the importer — entity matching, the recording-ID → release-track →
+title ladder, entity creation through catalog providers, and the ADR-0007 promotion machinery. That's
+crate-side logic fed by `Identify` results, and it never moves.
 
 ### Built
 
 1. **Release-candidate pipeline** — needed to dogfood everything else
 2. **Provider config schema** — cross-cutting; providers declare their own settings UI
-3. **`IngestProvider`** contract + a default implementation
+3. **`IngestProvider`** contract + `sleeve` and `passthrough`
 4. **`NotificationProvider`** contract + navidrome / music-assistant providers
 5. **`DownloadProvider`** contract + slskd provider
 6. **State-machine refactor** — ownership moves off `file_path` onto provider refs
@@ -159,8 +143,7 @@ The NAS compose file pins the RC tag directly; `latest` stays on v1 until v2 shi
 
 ## Provider config — cross-cutting
 
-Every provider kind gets this, not just ingest. Providers **declare their own settings** and crate
-renders them.
+Every provider kind gets this. Providers **declare their own settings** and crate renders them.
 
 ```protobuf
 rpc GetConfigSchema(Empty) returns (ConfigSchema);
@@ -179,16 +162,15 @@ message ConfigField {
 
 What this buys:
 
-- **The navidrome / music-assistant settings migration solves itself** — they stop being crate
-  settings and become provider config, rendered from the provider's own schema. Crate can migrate
-  existing values automatically on first run.
+- **The navidrome / music-assistant settings migration solves itself** — they become provider config
+  rendered from the provider's own schema. Crate migrates existing values on first run.
 - **Secrets keep working** — `SECRET` fields inherit the existing `sensitiveSettings` redaction.
 - **External providers become configurable** without env-var surgery.
-- **Validation lives with the provider**, which is the only thing that knows what's valid.
+- **Validation lives with the provider**, the only thing that knows what's valid.
+- **`naming_template` moves to sleeve's config**, so it survives v2 as a provider setting rather
+  than disappearing.
 
-Plus a **raw passthrough field** for tools with config surfaces too large to model — beets has 159
-keys across 39 sections, and crate should not try to render that. The provider exposes the handful
-that matter as typed fields and takes the rest as an opaque blob.
+Plus a **raw passthrough field** for third-party providers with config surfaces too large to model.
 
 ---
 
@@ -203,9 +185,60 @@ Crate points at a release and hands over what it knows. The provider owns everyt
 | `Info` | unary | Name, version, capabilities |
 | `Place` | unary | **Destructive.** File + claims in → location + ref out |
 | `Identify` | **server stream** | Examine files the provider doesn't own yet — what is this? |
-| `Resync` | **server stream** | Re-examine files it *does* own — what changed? |
-| `Resolve` | unary | Ref in → current path + exists. Single-item lookup. |
+| `Resolve` | unary | Ref in → current path + exists |
 | `Remove` | unary | Delete a file *through* the provider so its own record stays consistent |
+| `Resync` | **server stream** | Re-examine what it owns, stream back deltas |
+| `Search` | unary | Identity in → plausible unclaimed files out. Powers lost-file recovery. |
+| `Found` | unary | "This file is the one for this track." Validates, adopts, returns a new ref. |
+
+### `lost` — owned-lite
+
+A third outcome between "have it" and "don't." A provider that can't locate a file it placed reports
+`lost` rather than guessing:
+
+- **not re-downloaded** — crate believes the file probably still exists somewhere
+- **not eligible for upgrades or reject** — there's nothing to replace or delete
+- **surfaced in the UI as actionable**, not buried
+
+Recovery is `Search` → user picks → `Found`. `Search` takes the track's identity and returns
+plausible unclaimed files with confidence scores; the UI shows them as suggestions and also accepts a
+freeform path. `Found` validates whatever it's given — it reads the file's tags and can reject a
+wildly wrong pick rather than blindly adopting it — then returns the new ref. The user can also just
+mark the track `wanted` and let crate re-acquire it.
+
+> **⚠️ One change from the review comment.** You proposed `List()` — everything the provider knows
+> about — as the suggestion source. I'd make it `Search(identity)` instead. Two reasons: a lost
+> file is by definition *not* in the set the provider knows about, so `List` returns the wrong
+> population; and on a 100k-file library it returns 100k rows to populate a dropdown. `Search`
+> is targeted, cheap, and returns the right thing. A streaming `List` is still worth having as a
+> **diagnostic** — "show me everything this provider tracks" — just not as the picker source.
+
+### Losing files is universal, not a capability
+
+**No flag for it.** Three reasons:
+
+- **"I never lose files" is a promise no provider can keep.** The user can always `mv` something.
+  A provider that declared it would be lying the first time someone reorganizes a folder.
+- **Crate must handle `lost` regardless**, so the flag gates no code — it only adds a branch and one
+  more thing a third-party provider can get wrong.
+- **The UI doesn't need it.** Show the recovery affordance when lost tracks exist. That's always
+  accurate and can never go stale against a declared capability.
+
+**Instead, make `Search` and `Found` required methods.** If a provider can say "lost," it must help
+you recover — one that can't is a dead end. This is nearly free for `sleeve`, which already walks
+its directories for `Identify`.
+
+### Correction to what this document said one revision ago
+
+I wrote that `sleeve` should report `wanted` for a missing file, on the reasoning that sleeve owns
+placement so a missing file means the user deleted it. **That's wrong and it's dangerous.**
+
+Someone who manually reorganizes their music folder would have every track flip to `wanted` and
+crate would re-download the entire library.
+
+So: **`lost` is the safe default for any missing file, from any provider.** `wanted` requires either
+an explicit choice (passthrough's **strict** mode, whose entire purpose is that behavior) or a human
+saying "yes, it's really gone." Never re-acquire on an inference.
 
 ### `Place` carries two claims, not one
 
@@ -214,154 +247,231 @@ Crate has two independent, possibly-conflicting ideas about what a file is:
 - **`catalog_claim`** — what crate went looking for. MBID (primary when present), plus artist,
   album, title, track/disc number, year as fallback.
 - **`download_claim`** — what the source said it was. Raw filename, whatever the download provider
-  parsed out of it, format, bitrate, source identifier.
+  parsed from it, format, bitrate, source identifier.
 
 **Send both.** They disagree more often than is comfortable — crate's auto-download rule only
 requires artist+title to appear somewhere in the path, which is a weak guarantee that the bytes are
-what was wanted. A provider that can fingerprint audio is strictly better positioned to settle it
-than crate is.
+what was wanted. A provider that can fingerprint audio is better positioned to settle it than crate.
 
-### Trust the claim until you know better
+### Identity points, it doesn't dictate
 
-Default provider behavior: **if it doesn't know better, trust `catalog_claim` and use it.** Crate
-downloaded this file *because* it was watching that release, so it's high-confidence. A provider that
-can do better — fingerprint the audio, fetch the full release, disagree outright — should, and
-should say so. One that can't just uses what it was given.
+Crate says *"this is track 3 of Discovery by Daft Punk."* It does **not** say *"write these exact
+tag values."* What lands in the file is the provider's business: which fields to write, cover art,
+ReplayGain, path layout, all of it. Default behavior: **if it doesn't know better, trust
+`catalog_claim`.** A provider that can do better should, and should report what it actually wrote.
 
-Crate points. It never dictates tag values. What lands in the file is the provider's business:
-which fields to write, cover art, ReplayGain, format conversion, path layout, all of it.
-
-### `Resync` — the provider re-checks its own work
-
-Both leading ingest tools already have this operation natively (`beet mbsync`, `wrtag sync`), so the
-contract should expose it rather than making crate reimplement it.
-
-Crate's scheduler drives it on an interval. The provider walks what it owns and streams back deltas:
-refs whose path moved, refs whose metadata changed, refs that vanished. Crate applies them.
-
-**This replaces `scheduler.checkFileIntegrity` entirely.** Today that job stats every owned track's
-path — which under v2 would see a provider-moved file as missing and re-download it forever.
-`Resync` is also strictly better than calling `Resolve` in a loop: one streamed pass instead of N
-round trips.
-
-`Resolve` stays for single-item lookups where a full pass is overkill.
+**Consequence to accept:** the tags in the file and the values in crate's DB can diverge. That's
+correct behavior, not a bug — but `Identify`-based re-matching must tolerate near-misses rather than
+assuming exact equality.
 
 ### The ingest verdict is a signal, not a replacement
 
-> **⚠️ Pushing back here.**
+The provider's verdict is authoritative *about the file*. It gets stored, and where it disagrees
+with the catalog claim the UI should say so. It does **not** overwrite crate's catalog identity:
 
-You proposed: once the ingest provider says "this is this song," that becomes crate's source of
-truth, and everything is in flux until then.
-
-**Half right.** The provider's verdict *is* authoritative about the file. It should be stored, and
-where it disagrees with the catalog claim the UI should say so. But it shouldn't overwrite crate's
-catalog identity, for two reasons:
-
-- **Gap detection breaks.** Crate knows *Discovery* has 14 tracks because a catalog provider said so,
-  and tracks which of the 14 it owns. If an ingest verdict re-points a track at a different release,
-  the album's track list shifts underneath and gaps appear or vanish incorrectly.
+- **Gap detection breaks.** Crate knows *Discovery* has 14 tracks because a catalog provider said so.
+  Re-pointing a track at a different release shifts the album's track list underneath it.
 - **Catalog linkage breaks.** Entities carry `provider` + `provider_id` from the catalog provider.
-  That's what answers "what else does this artist have?" An ingest provider overwriting it severs
-  the thing crate exists to do.
+  That's what answers "what else does this artist have?"
 
-**You already decided this exact question.** ADR-0005 stores the MusicBrainz *recording* id as a
-separate signal rather than resolving it into the release-track id — same shape of problem, and the
-reasoning holds: a recording id can't place a track on a specific release.
+ADR-0005 already decided this shape of question — the MusicBrainz *recording* id is stored as a
+separate signal rather than resolved into the release-track id. Same reasoning holds.
 
-So: store the ingest verdict alongside the catalog identity, don't collapse them. **The catalog
-identity is authoritative about the collection; the ingest verdict is authoritative about the file.**
-
-The upside you're pointing at is real though, and it comes free: a persistent mismatch between the
-two is a strong signal crate downloaded the wrong thing. That's a quality-control feature worth
-surfacing — arguably better than silently overwriting, because the user gets to see it.
+Upside that comes free: a persistent mismatch between the two is a strong signal crate downloaded
+the wrong thing. Worth surfacing as quality control.
 
 ### Identity in, ref out
 
-`Place` returns an opaque **ref** — provider-chosen, stored by crate. `Resolve` / `Remove` / `Resync`
-speak in refs. The provider knows its own IDs; crate never sends identity back, because crate still
-holds it in its own DB. If refs ever need rebuilding, the recovery is an `Identify` pass — machinery
-v2 has to build anyway for the v1 migration.
+`Place` returns an opaque **ref** — provider-chosen, stored by crate. `Resolve` / `Remove` /
+`Resync` speak in refs. Crate never sends identity back; it still holds it in its own DB.
 
-### Per-track placement always works
+**Both shipped providers make the ref the path**, because neither moves files behind crate's back.
+The indirection exists so the contract stays honest for providers that do — adding refs later would
+break every provider written against v2, and a contract that only works in-process isn't a contract.
 
-Identity travels with every file, including album context. A provider handed one track of a
-fourteen-track album has everything it needs to place that one track correctly.
+### Per-track is crate's model
 
-**`Place` is per-track. Batching is an optimization, not a correctness requirement** — one cover-art
-fetch per release instead of per track, one metadata lookup instead of fourteen. Providers that
-prefer batches advertise it; providers that don't still work correctly.
+Crate downloads track-at-a-time off Soulseek. **Partial releases are the steady state, not an
+exception** — some tracks simply never become available. Both shipped providers place single tracks
+natively.
+
+Providers that require a complete release declare it, and crate holds their files until the release
+is complete, surfacing "waiting on 3 more tracks" rather than sitting on them silently. This is the
+capability that would let someone ship a wrtag provider out of tree.
 
 ### Capabilities are a defined enum
 
 Not free-form strings — every provider would invent its own and crate couldn't branch on them.
-Adding one is a deliberate contract change.
 
 ```protobuf
 enum Capability {
-  CAPABILITY_UNSPECIFIED      = 0;
-  CAPABILITY_BATCH_PLACE      = 1;  // prefers whole releases (optimization)
-  CAPABILITY_OFFLINE_IDENTIFY = 2;  // can identify from local tags, no network
-  CAPABILITY_STABLE_REFS      = 3;  // refs survive the provider relocating files
-  CAPABILITY_RESYNC           = 4;  // can re-examine and correct what it owns
+  CAPABILITY_UNSPECIFIED        = 0;
+  CAPABILITY_BATCH_PLACE        = 1;  // prefers whole releases (optimization)
+  CAPABILITY_REQUIRES_RELEASE   = 2;  // cannot place a partial release at all
+  CAPABILITY_OFFLINE_IDENTIFY   = 3;  // can identify from local tags, no network
+  CAPABILITY_STABLE_REFS        = 4;  // refs survive the provider relocating files
 }
 ```
 
-### Why `Identify` and `Resync` stream
+### `Resync` is required, and integrity checking moves with it
 
-A pass over 100k files through a rate-limited external tool is measured in hours. Batching is the
-provider's problem — but crate needs progress and partial results or the UI is a spinner. Streaming
-gives both, and makes the pass cancellable.
+`scheduler.checkFileIntegrity` **moves out of crate and into the providers.** Crate's scheduler calls
+`Resync` on an interval and applies the deltas the provider streams back: refs whose path moved, refs
+whose metadata changed, refs that vanished.
 
-### Why `Identify` needs a read-only flag
+There is no crate-side fallback, and that's the point — **stat-ing a file is touching a file**, which
+crate doesn't do. Leaving a filesystem walk in the scheduler would have been the one place the layer
+boundary leaked.
 
-`POST /api/library/import` is non-destructive today — people click it to adopt an existing
-collection. At v2 that same button hands files to a tool that moves things. First run must be able
-to say look-don't-touch. A flag on the request, not a separate RPC.
+For `sleeve` and `passthrough` the implementation is the same stat loop that lives in the scheduler
+today, just relocated. For a provider that relocates files, it's a real reconciliation pass.
+
+### Why `Identify` streams, and why it needs a read-only flag
+
+A pass over 100k files can take hours. Streaming gives progress, partial results, and cancellation.
+
+The read-only flag matters because `POST /api/library/import` is non-destructive today — people click
+it to adopt an existing collection. Under v2 that same button hands files to a provider that may move
+things. First run must be able to say look-don't-touch.
 
 ### Crate never deletes files
 
-Deletion goes through the provider so it can drop its own record first. Two callers:
-
-- **Track rejection** (`internal/services/reject`) — `Remove(ref)` replaces `library.DeleteFile`
-- **Quality upgrade** — `Remove(old_ref)` then `Place(new_file)`
+Deletion goes through the provider so it can drop its own record first. Two callers: track rejection
+(`Remove(ref)` replaces `library.DeleteFile`) and quality upgrade (`Remove(old_ref)` then `Place`).
 
 Two consequences to design for:
 
 - **The safety gate moves.** Today `library.Contains` guarantees crate never deletes outside the
-  library root. That guardrail becomes the *provider's* responsibility — a third-party process is
-  now trusted not to nuke things. This belongs in the contract as an explicit MUST.
+  library root. That becomes the provider's responsibility — an explicit MUST in the contract.
 - **Deletes can now fail.** `os.Remove` became a network call to a process that might be down.
-  Reject needs a pending-removal state and a retry, or it has to fail loudly. It cannot silently
-  mark a track `wanted` while the old file is still on disk.
+  Reject needs a pending-removal state and a retry, or it fails loudly. It cannot silently mark a
+  track `wanted` while the old file is still on disk.
 
 ### Hard boundary: providers never write to crate's DB
 
-The provider says *what a file appears to be*. Crate decides what that means.
+The provider says *what a file appears to be*. Crate decides what that means. `Identify` returns
+`{path, title, artist, album, mbid, confidence}` and crate runs its own matching ladder against its
+own tables. Same boundary catalog providers already respect.
 
-Entity creation needs provider IDs, ranks, and artwork from the **catalog** providers — an ingest
-provider has no access to that registry and shouldn't. So `Identify` returns
-`{path, title, artist, album, mbid, confidence}` and crate runs its own matching ladder
-(recording ID → release-track ID → title-within-album) against its own tables.
+---
 
-Same boundary catalog providers already respect: they return data, crate persists it.
+## The two shipped providers
+
+### `crate-ingest-sleeve` — the default
+
+A sleeve is what you put a record in: it wraps it properly and files it. This is crate's existing
+tagger + organizer + naming template, extracted behind the contract.
+
+Nothing about its behavior changes. It's non-destructive (ADR-0004), per-track, templated,
+CGO-free, MIT. `naming_template` becomes its provider config.
+
+**Keeping this is not a compromise.** The research below established it's *more* correct than the
+alternatives for crate's requirement — beets' writer destroys the ReplayGain precision and
+MusicBrainz IDs that ADR-0004 exists to protect.
+
+### `crate-ingest-passthrough` — for external library managers
+
+For anyone who wants crate to acquire music and nothing else. Answers issue #13 directly.
+
+- **`Place`** returns the source path unchanged and writes nothing
+- **`Identify`** is a real implementation, not a stub — it reads tags so crate can adopt whatever the
+  external tool did with the files
+- **`Remove`** deletes
+
+**This is the harder of the two providers, not the easier one** — it has the least information. When
+the user runs `beet import`, the file moves and passthrough has no hook, no shared database, and no
+way to be told. So the interesting question isn't what it does, it's **how it decides a file is
+still owned.**
+
+#### Tracking modes
+
+How much the provider trusts the disk. One config field, three values.
+
+| Mode | Ownership means | Trade |
+| --- | --- | --- |
+| **strict** | The file is where I left it | Zero false positives, but re-downloads forever for anyone running an external tool. The honest default. |
+| **find** | The file is *somewhere* across my configured dirs, matched by tags | Kernald's case. Walks staging **and** a configurable library dir, reconciling by the same recording-ID → release-track → title ladder crate's importer already uses. Heuristic — loses files retagged beyond recognition. |
+| **ledger** | I downloaded it once; that's enough | Zero filesystem work, zero false re-downloads. Crate becomes a *download ledger*, not a library index. |
+
+**find** mode is exactly what issue #13 asked for — *"consider files in both that download folder and
+the library when computing what is already owned"* — so the requested behavior and the mechanism
+that makes passthrough work are the same thing.
+
+**ledger mode has a consequence that must surface in the UI:** with no file to replace and nothing to
+`Remove`, **quality upgrades and track rejection become no-ops.** That's legitimate for someone whose
+external tool owns the library — "don't grab this twice" is the whole semantic they need — but crate
+must say so rather than showing controls that silently do nothing.
+
+#### The push channel — orthogonal to all three
+
+Tools that can run a command on import can tell the provider directly. passthrough exposes an
+**inbound HTTP endpoint** alongside its gRPC surface; when something posts a file's new location and
+status, that's authoritative and overrides whatever the tracking mode would have concluded.
+
+It layers on *any* mode rather than replacing them, because a push channel that's the only source of
+truth breaks silently the day someone fat-fingers their hook config. Push when it fires, configured
+mode when it doesn't.
+
+**Ship it as a generic endpoint, not a beets feature.** beets' `hook` plugin runs a command on
+`item_imported`, so the user points it at the endpoint — but any tool that can run a command on
+import drives the same thing. The beets recipe belongs in the docs; the name doesn't belong in the
+code. Naming it after beets is the exact coupling issue #13 warned against.
+
+This adds a port and a shared secret to passthrough's config schema. Precedented — crate serves both
+gRPC and HTTP today.
+
+#### Why this stays inside the provider
+
+Crate always calls `Resync` and applies whatever comes back. **ledger** mode always answers
+"everything's fine," **strict** stats, **find** walks. Crate needs zero special-casing and the modes
+stay a provider config field.
+
+The one thing crate does need: because passthrough doesn't declare `CAPABILITY_STABLE_REFS`, a
+vanished file goes to a *lost, pending rediscovery* state rather than straight to `wanted`. Without
+that, `Resync` sees the staging file gone, marks it `wanted`, and re-downloads a track sitting
+happily in the library.
+
+**Documented limitation, not hidden:** in **find** mode, if the external tool retags a file beyond
+recognition and crate holds no MBID for it, crate loses track and eventually re-downloads. That's
+inherent to not controlling placement. A decoded-audio-stream hash would survive any retag exactly,
+but it means decoding every file — a robustness upgrade for later, not v2.
+
+passthrough is also the contract's best stress test: a provider that refuses to place anything proves
+the contract doesn't assume placement.
+
+---
+
+## Issue #13 — the staging problem
+
+The requester's spec, in his own words, is three things:
+
+1. No automatic import, no auto-tagging or renaming in the existing library
+2. A download folder distinct from the library
+3. **Count files in *both* the download folder and the library when computing what's already owned**
+
+Point 3 is the one that's easy to miss and it's load-bearing. Without it: crate downloads a track,
+passthrough leaves it in staging, the integrity check sees no file at the expected library path,
+marks it `wanted`, and **re-downloads it forever**.
+
+So the staging state is not cosmetic:
+
+- A new track state between `downloading` and `owned` — call it `staged`. The file is acquired,
+  crate stops re-queueing it, and the UI honestly says "waiting on your importer."
+- A scheduled `Identify` pass over the staging dir **and** the library. When the external tool
+  imports the file, crate's next pass adopts it and `staged` → `owned`.
+- The integrity check must understand externally-managed tracks and not reap them.
+
+He also explicitly declined a beets integration: *"I'm not sure it would bring much value, for the
+cost of tying this to beets specifically."* Recorded here because it's the clearest statement of why
+crate ships no third-party ingester.
 
 ---
 
 ## NotificationProvider
 
-gRPC surface stays deliberately small — `Info` + `Notify`, plus the shared config RPCs. It grows as
-use cases appear.
-
-Navidrome and Music Assistant already implement this in all but name:
-
-```go
-type PostDownloadNotifier interface {
-    TriggerScan(ctx context.Context)
-}
-```
-
-Lifting that to gRPC is close to mechanical, which makes it the right place to prove the v2 provider
-pattern before touching the state machine.
+gRPC surface stays small — `Info` + `Notify`, plus the shared config RPCs. Navidrome and Music
+Assistant already implement this in all but name (`PostDownloadNotifier.TriggerScan`), which makes it
+the right place to prove the v2 provider pattern before touching the state machine.
 
 ### Inbound events go over crate's HTTP API, not gRPC
 
@@ -369,12 +479,10 @@ The Music Assistant reject watcher isn't a notification — it's an *inbound* si
 track in the reject playlist → crate rejects and re-downloads it). Rather than making the gRPC
 contract bidirectional, **the provider calls crate's own HTTP API**.
 
-This inverts the dependency and costs almost nothing:
-
 - `POST /api/tracks/reject` already exists and takes `{artist, title}` — exactly what MA hands you
 - Any provider can trigger any crate action without a contract change
 - The boundary holds: the provider isn't writing rows, it's calling an endpoint that runs crate's
-  own reject logic (delete file, blacklist source, reset to wanted, re-enqueue)
+  own reject logic
 
 **To solve:** providers need crate's URL injected. Trivial for in-image providers — `ProcessManager`
 already sets `PORT` in their env, so `CRATE_API_URL` rides along. External providers configure it.
@@ -383,7 +491,7 @@ already sets `PORT` in their env, so `CRATE_API_URL` rides along. External provi
 
 ## DownloadProvider
 
-**Provider owns protocol + availability. Crate owns policy.** *(Settled.)*
+**Provider owns protocol + availability. Crate owns policy.**
 
 | Owner | Concern |
 | --- | --- |
@@ -391,27 +499,17 @@ already sets `PORT` in their env, so `CRATE_API_URL` rides along. External provi
 | **Crate** | Quality tiers, negative keywords, min bitrate, upgradeability, retry backoff policy |
 
 The provider returns **ranked candidates** carrying a normalized availability score plus
-format/bitrate. Crate applies policy and picks.
+format/bitrate. Crate applies policy and picks. It also supplies the `download_claim` that rides
+along to ingest.
 
 Two things force crate to keep tier logic regardless: it must pass tiers **down** or the provider
-can't honor preferences, and it must get format+bitrate **back** or `IsUpgradeable` can't work and
-the daily upgrade scan is dead. Given both, moving selection out means every provider author
-re-implements crate's scoring using data crate handed them — and gets it subtly wrong. The
-`TestScoringBalance` invariants (artist bonus can't flip a tier; all bonuses clear one tier gap but
-not two) are user policy and would evaporate.
+can't honor preferences, and it must get format+bitrate **back** or `IsUpgradeable` can't work.
+Given both, moving selection out means every provider author re-implements crate's scoring and gets
+it subtly wrong. The `TestScoringBalance` invariants are user policy and would evaporate.
 
-What genuinely belongs to the provider is anything Soulseek-shaped: free upload slots, queue depth,
-whether a user is offline. Those mean nothing to a torrent or usenet provider and crate shouldn't
-model them.
-
-The provider also supplies the `download_claim` that rides along to ingest — the raw filename and
-anything it parsed from it.
-
-### Shaped for slskd, deliberately
-
-The contract will be Soulseek-flavored and that should be written down rather than discovered.
-slskd stays first-class; other implementations adapt or don't exist. Not pre-generalizing is the
-right call — but it's a call, and it belongs in an ADR.
+**Shaped for slskd, deliberately.** The contract will be Soulseek-flavored. slskd stays first-class;
+other implementations adapt. Not pre-generalizing is the right call — but it's a call, and it belongs
+in an ADR.
 
 ---
 
@@ -419,155 +517,118 @@ right call — but it's a call, and it belongs in an ADR.
 
 **This is the actual work. The gRPC plumbing is the easy part.**
 
-Today ownership is welded to the filesystem:
-
-- All three code paths that set `status = 'owned'` write `file_path` in the same statement
-- `scheduler.checkFileIntegrity` stats every owned track and demotes it to `wanted` when the file is gone
-- `FindTrackByPath` (the MA reject watcher) joins on `file_path`
-- Quality upgrades delete the old file at its known path
-- `library.Contains` gates every destructive operation
-
-If a provider owns placement, every one of those breaks.
+Today ownership is welded to the filesystem: all three code paths that set `status = 'owned'` write
+`file_path` in the same statement, `checkFileIntegrity` stats every owned track, `FindTrackByPath`
+joins on it, quality upgrades delete the old file at its known path, and `library.Contains` gates
+every destructive operation.
 
 ### The change
 
 `tracks` gains `ingest_provider` + `ingest_ref`, mirroring how entities already store
-`provider` + `provider_id` for catalog identity — plus the ingest verdict stored as its own signal
-(see above). `file_path` **stays as a cache, not as truth** — so the reject path doesn't need a gRPC
-round-trip per event — and `Resync` / `Resolve` are the authority when the cache is stale.
+`provider` + `provider_id` for catalog identity, plus the ingest verdict as its own signal.
+`file_path` **stays as a cache, not as truth**, so the reject path doesn't need a round-trip per
+event.
 
-The scheduler's integrity job becomes: call `Resync`, apply the deltas.
+Two new statuses join `wanted` / `downloading` / `owned`:
+
+| Status | Meaning | Re-download? | Upgrade / reject? |
+| --- | --- | --- | --- |
+| `staged` | Acquired, sitting where the provider left it, waiting on an external tool | No | No |
+| `lost` | Provider placed it but can't locate it now | No | No — needs `Search` → `Found`, or a human marking it `wanted` |
+
+The invariant that matters: **crate never re-acquires on an inference.** `wanted` comes from an
+explicit provider mode or a human, never from "I looked and didn't see it."
 
 ### Migration for existing v1 users
 
-Their library is already organized by crate's naming template, `file_path` is populated, entities
-exist. v2 first-run does an `Identify` pass to establish refs. Until it completes, tracks have a path
-but no ref — that needs its own state, and the integrity check must not reap them meanwhile.
+Their library is already organized by crate's naming template and `file_path` is populated. Because
+`sleeve` is behavior-identical to v1's organizer and makes the ref the path, **this migration is
+close to trivial** — refs backfill from existing paths. That's a real dividend of shipping our own
+default rather than a foreign tool.
 
 ---
 
 ## ADR-0007 — port it
 
-**What it is:** when you import a folder of MP3s, crate can't tell who the artist really is, so it
-creates a placeholder `local` artist. ADR-0007 is the machinery for saying *"this local thing is
-actually Radiohead"* — which then pulls the real discography and surfaces what's missing.
-Two files (`internal/api/reconcile.go`, `manual_link.go`) plus badges in the UI.
+When you import a folder of MP3s, crate can't tell who the artist really is, so it creates a
+placeholder `local` artist. ADR-0007 is the machinery for saying *"this local thing is actually
+Radiohead"* — which pulls the real discography and surfaces what's missing.
 
-**Recommendation: port it.** It's crate-side reconciliation with nothing to do with tagging or
-placement. Fed by `Identify` results instead of the importer's own tag scan. Without it, an imported
-library is a dead list with no gap detection — which is crate's entire value proposition.
-
-It gets *less* load-bearing in v2: a good `Identify` returns real MBIDs for well-tagged files, so
-fewer imports land as `local` at all. It becomes the fallback for poorly-tagged music rather than
-the main path.
+**Port it.** It's crate-side reconciliation with nothing to do with tagging or placement, fed by
+`Identify` results instead of the importer's own tag scan. Without it, an imported library is a dead
+list with no gap detection — which is crate's entire value proposition.
 
 ---
 
 ## Lidarr shim — lean into it
 
 The shim stays in `internal/api/lidarr.go` and the principle holds: **crate's core is never reshaped
-to accommodate Lidarr.** But shim *coverage* becomes a real v2 goal, not a leftover.
+to accommodate Lidarr.** But shim *coverage* becomes a real v2 goal.
 
-The payoff is ecosystem reach — every Lidarr-compatible client, mobile app, and automation that
-speaks the v1 API works against crate for free. Helmarr already does. Expanding coverage means more
-tools work without crate writing a single integration.
-
-Work: enumerate what Lidarr v1 endpoints real clients actually call, implement the gaps, and treat
-the shim as a first-class supported surface with its own tests — rather than a convenience that
-happens to exist.
+The payoff is ecosystem reach — every Lidarr-compatible client and automation that speaks the v1 API
+works against crate for free. Helmarr already does. Work: enumerate what endpoints real clients
+actually call, implement the gaps, and treat the shim as a first-class supported surface with its own
+tests.
 
 ---
 
-## 🔬 Default ingest provider — research in flight
+## Research findings — recorded so nobody re-litigates
 
-Two things I got wrong or under-researched, both being verified now:
+Both candidates for a bundled third-party ingester were evaluated by writing and running code, not
+reading docs. Both failed, for different reasons.
 
-**I overstated the beets case.** My "beets is weak at ingest" claim was too broad. What's actually
-verified is that **`beet import -q` (the unattended CLI importer) is weak** — it only auto-applies
-below a 0.04 match distance and silently skips everything else with exit code 0, even when handed an
-exact MBID. But that assumed the provider drives beets' *autotagger* through its CLI. A native
-Python provider calling `beets.library` directly may bypass matching entirely. Being verified.
+### wrtag — structurally incompatible
 
-**wrtag as the default deserves a real comparison.** ~405 stars, essentially one maintainer, and as
-the sole required ingest provider its bugs become crate's bugs with no fallback. Still being
-researched: wrtag's actual programmatic surface and MusicBrainz Picard's real scriptability.
+- ✅ **Is** a real importable Go library. `internal/` holds only CLI plumbing. Compiles CGO-free,
+  cross-compiles, and `useMBID` short-circuits straight to `GetRelease` with no search.
+- ❌ **Cannot place a single track.** `wrtag.go:176` returns `ErrTrackCountMismatch` unconditionally,
+  *above* the import-condition switch, so `Always` can't bypass it. Grepped the whole codebase:
+  **zero singleton, partial, or incomplete handling anywhere.** Two commands, both directory-scoped.
+  On a partial album the CLI matches, prints a diff and research links, and moves nothing.
+- ❌ **GPL-3.0**, no linking exception.
+- ❌ `wrtagweb` is an htmx hypermedia app, not an API — zero JSON encoders, `POST` returns no job ID
+  or Location header, destination path exists only interpolated into HTML.
+- ❌ A CoverArtArchive hiccup aborts the entire ingest (`wrtag.go:226` treats non-404 CAA errors as
+  fatal). Reproduced twice against real archive.org 500s.
 
-### Why we're not rolling our own — settled
+**Why it can't work here:** every release-oriented tagger is built on MusicBrainz's release-centric
+model, and the *arr ecosystem gets complete releases by construction — a torrent or usenet indexer
+ships a full album as one artifact. Soulseek is per-file. Crate is genuinely the different case.
 
-The tagging-library research came back and it reframes the choice.
+### beets — destroys the tags ADR-0004 exists to protect
 
-**Multi-format tag writing in pure Go is not a solved problem** — verified by building and
-round-tripping real files:
+- ✅ The Python API **does** organize with supplied metadata — no autotagger, no network, verified
+  with sockets hard-blocked. Singletons and partial albums are first-class (1-of-14 placed clean).
+  Path templating is a real language. `Identify` is world-class. MIT.
+- ❌ **`Item.write()` is destructive.** A pure no-op round trip mutated **17 tags on FLAC, 10 on
+  MP3**: `REPLAYGAIN_TRACK_PEAK 0.98765432 → 0.987654`, injected `BPM=0` / `COMPILATION=0` /
+  `DATE=0000`, fabricated `iTunNORM`. There is no field-subset write in the API.
+- ❌ **API stability is bad.** Six breaking changes shipped in *minor* releases, at least four with
+  no changelog entry. Pinning is insufficient — all 14 core deps are `>=` with no upper bounds.
+- ❌ Supplying the release MBID does **not** bypass scoring, at the API level as well as the CLI:
+  3-of-17 with the correct MBID scored dist=0.5510 with `missing_tracks` dominating.
 
-| Option | Verdict |
-| --- | --- |
-| `ambeloe/oggv` | Ogg **Vorbis** only, no Opus. **AGPL-3.0** — dealbreaker. 1 star, no tests. |
-| `cabbagekobe/tunetag` | MIT and advertises exactly what you'd want — but **silently destroys Ogg Vorbis files**. `WriteFile` returns `nil` and the file is unreadable: its re-pager assumes each header packet starts a fresh page and drops the Vorbis setup header. Reproduced. Its own tests miss it because they synthesize idealized files. |
-| `Sorrow446/go-mp4tag` | MIT, works, handles the hard `stco` chunk-offset fixup — **but the GitHub account is gone** (DMCA history). Code survives only via the Go module proxy, no maintained fork. Vendorable, never patchable. |
-| `abema/go-mp4` | Alive, MIT, 546★ — parses `ilst` fully but has **no tag API**. You'd write the writer plus chunk-offset repair yourself. |
-| DIY multi-library (`id3v2` + `go-flac` + `flacvorbis`) | **Empirically dead.** Actually built: MP3 and FLAC only — precisely the gap we're trying to close, still uncovered. |
+### The Go tagging library landscape
 
-**The one credible foundation is `go.senan.xyz/taglib`** — real TagLib compiled to WASM, run via
-wazero. Confirmed: no cgo, no subprocess, static builds and cross-compilation work, reads *and
-writes* every format we care about (MP3, FLAC, Ogg Vorbis, Opus, AAC/ADTS, M4A/ALAC, WavPack, WMA).
-Tested across 11 files — **all 8 audio streams bit-identical by decoded md5 after tagging**, and
-foreign tags preserved. +3.62 MB to the binary (~5% of the image). Concurrency-safe at 220 parallel
-ops. The wasm blob ships with a GitHub build attestation from a reproducible-build workflow.
+Relevant if the format gap is ever closed: **no permissively-licensed pure-Go library correctly
+writes both Ogg Vorbis and Opus.** `ambeloe/oggv` is AGPL and Vorbis-only. `cabbagekobe/tunetag` is
+MIT but **silently destroys Ogg Vorbis files** — `WriteFile` returns `nil` and the file is
+unreadable, because its re-pager drops the Vorbis setup header. `Sorrow446/go-mp4tag` works but its
+GitHub account is gone. The only complete option is `go.senan.xyz/taglib` (TagLib as wasm via
+wazero) — **LGPL-2.1**, which is why the format gap stays open.
 
-**And wrtag's own `tags/tags.go` is ~75 lines of pure passthrough over it.**
+**But the licensing picture is better than it first looks.** TagLib upstream ships **both**
+`COPYING.LGPL` and `COPYING.MPL` — it's dual-licensed LGPL-2.1 **or** MPL-1.1 at the recipient's
+option, and GitHub simply labels it LGPL. MPL-1.1 is file-level copyleft: publish changes to
+MPL-covered files, but linking into a differently-licensed work is explicitly fine. **TagLib itself
+was never the obstacle.**
 
-That's the reframe: **tagging isn't the hard part and isn't a differentiator.** Whatever we ship,
-the tag layer is a thin wrapper over the same library. What wrtag adds on top is *MusicBrainz
-matching and path templating* — and **crate supplies identity, so `Place` barely needs matching at
-all.** Matching earns its keep in `Identify` (unknown files), not `Place`.
+The obstacle is Senan's Go wrapper, which declares LGPL-2.1 only. Which makes the ask specific and
+easy to say yes to — see Still open.
 
-**The only viable Go foundation is LGPL, and MIT is non-negotiable.** `go.senan.xyz/taglib` — real
-TagLib compiled to WASM via wazero — is the one library that writes every format we care about
-CGO-free, and it's verified non-destructive to both foreign tags and audio bytes. It's also
-**LGPL-2.1**, and static embedding triggers §6 relinking obligations. Navidrome, gonic and wrtag all
-ship it, but **all three are GPL-3.0 and crate is MIT** — their precedent says nothing about our case.
-
-So: **crate ships no tagging code.** The existing providers handle it. *(Settled.)*
-
-That decision is doubly supported — the DIY path was dead on its own merits before licensing even
-came up, and this is written down so nobody re-litigates it in six months.
-
-### ⚠️ This makes one unanswered question blocking
-
-**No first-party tagging + no CLI-output-parsing means the default provider needs a real
-programmatic surface.** Three of them qualify, so the gate is wider than it first looks:
-
-- **wrtag's Go packages** → `crate-ingest-wrtag` imports them, GPL contained in that repo. Best case.
-- **`wrtagweb`'s HTTP API** → also fine. Starting a long-lived server and speaking HTTP to it is the
-  same pattern `ProcessManager` already uses for gRPC providers. Not shelling out.
-- **beets' Python API** → `crate-ingest-beets` imports `beets.library` in-process. Also fine.
-
-Only the CLI paths are disqualified. So the open questions are about *which* default, not whether
-one exists:
-
-- **What is wrtag's actual programmatic surface** — Go packages, `wrtagweb` HTTP, or CLI only? Can
-  it accept a supplied release ID instead of insisting on matching?
-- **Can beets be driven as a pure organizer** via its Python API, bypassing the autotagger when
-  crate supplies identity? (The verified weakness is `beet import -q` — the *CLI* importer — which
-  only auto-applies below a 0.04 match distance and silently skips everything else with exit code 0,
-  even handed an exact MBID. A native Python provider calling `beets.library` directly may sidestep
-  that entirely.)
-
-If both come back CLI-only, that's when the exception policy above applies — one tool, one ADR, an
-exit condition, contained in the satellite repo. Worth settling before phase 3 starts either way.
-
-### Correction to an earlier revision of this plan
-
-I wrote that Navidrome uses go-taglib in a way that implied write-path validation. **Navidrome does
-not write tags at all** — zero `WriteTags`/`WriteImage` call sites — and gonic depends on wrtag
-rather than the library directly. The three converged on *reading*. The production proof for the
-**write** path is wrtag alone: 405★, one maintainer.
-
-Also worth recording: crate's existing FLAC tagger is **not** affected by the `go-flac`
-duplicate-tag footgun — it replaces the comment block in place rather than appending. That
-correctness came from ~100 hand-written lines, and it's the kind of thing that gets lost when the
-code is deleted. Whatever ships as default must be verified to preserve ReplayGain and MusicBrainz
-IDs the same way.
+Worth knowing if anyone builds a beets provider out of tree: **`mediafile`** — the tag library beets
+itself sits on — is **MIT** and does not have the destructive-write problem. beets' `Item.update()`
+nulling unset fields is what causes it.
 
 ---
 
@@ -575,10 +636,13 @@ IDs the same way.
 
 | Change | Impact |
 | --- | --- |
-| `naming_template` stops working | **This was issue #1** — someone asked for it and you built it. Users reconfigure layout in the ingest tool. Existing files are never renamed, so old and new layouts coexist. |
-| `navidrome_*` / `music_assistant_*` settings move to provider config | Handled by the provider config schema — crate migrates the values automatically on first run. |
-| Tagging behavior changes | ADR-0004's non-destructive guarantee becomes the provider's promise, not crate's. **Whatever ships as default must be verified to preserve ReplayGain + MusicBrainz IDs** the way the current tagger does. |
-| First run does a full library `Identify` pass | Slow on large libraries. Needs a progress UI. |
+| `navidrome_*` / `music_assistant_*` settings move to provider config | Handled by the provider config schema — crate migrates values automatically on first run |
+| `naming_template` moves to sleeve's provider config | Same value, new home. Behavior unchanged. |
+| `CRATE_PROVIDERS` config format changes | Provider naming convention lands with v2 |
+| Enabling Music Assistant still needs a restart | Unchanged from v1 |
+
+**Notably absent:** tagging and layout behavior. Because `sleeve` *is* the v1 organizer, existing
+libraries keep working and nothing gets renamed.
 
 ---
 
@@ -587,59 +651,39 @@ IDs the same way.
 ### One repo through v2.0.0, then split
 
 Develop v2 in the crate repo with the contract in flux, then break out satellites at release.
-Contract changes during build-out would otherwise be a three-step cross-repo dance (release proto →
-update N satellites → release each → bump pins) landing exactly when the contract churns daily.
-Go workspaces make the eventual transition mechanical.
+Contract changes during build-out would otherwise be a three-step cross-repo dance landing exactly
+when the contract churns daily. Go workspaces make the eventual transition mechanical.
 
 ### The `crate` org, post-split
 
 `crate-<kind>-<impl>`:
 
-| Repo | Kind | Language |
-| --- | --- | --- |
-| `crate` | the orchestrator | Go |
-| `crate-proto` | the contracts — everything depends on it | proto → many (see below) |
-| `crate-catalog-musicbrainz` | catalog | Go |
-| `crate-catalog-deezer` | catalog | Go |
-| `crate-download-slskd` | download | Go |
-| `crate-ingest-wrtag` | ingest | Go |
-| `crate-ingest-beets` | ingest | **Python** |
+| Repo | Kind |
+| --- | --- |
+| `crate` | the orchestrator |
+| `crate-proto` | the contracts — everything depends on it |
+| `crate-catalog-musicbrainz` | catalog |
+| `crate-catalog-deezer` | catalog |
+| `crate-download-slskd` | download |
+| `crate-ingest-sleeve` | ingest (default) |
+| `crate-ingest-passthrough` | ingest |
 
-Binaries follow the repo name, which changes the `CRATE_PROVIDERS` config format — worth landing
-with v2 rather than after people have written config against the old shape.
-
-### Stubs in as many languages as we can get cheaply
-
-Agreed on the goal — but the cost isn't *generating* stubs (that's one `protoc` invocation anyone
-can run), it's **publishing and versioning a package per language**: a Go module path, a PyPI
-package, an npm package, a crate, each needing its own release pipeline kept in sync with the
-contract. Hand-rolled, that's where multi-language support rots — and a stale stub three contract
-versions behind is worse than no stub at all.
-
-**`buf` solves exactly this.** Push the module to the Buf Schema Registry and it publishes generated
-SDKs to Go modules, PyPI, npm, Maven, Cargo, NuGet, and Swift Package Manager automatically —
-one config instead of seven pipelines.
-([BSR generated SDKs](https://buf.build/docs/bsr/generated-sdks/), [consuming them](https://buf.build/docs/bsr/generated-sdks/tutorial/))
-
-So: **the `.proto` files are the canonical artifact** — anyone can generate from them — and BSR
-gives the pre-built SDKs for free on top. Crate itself only needs Go and Python; the rest cost
-nothing extra.
+All first-party, all Go, all MIT, all CGO-free. No foreign runtime enters the image.
 
 The main image pulls release artifacts at build time. One cost to design around: **the build stops
 being reproducible from one `git clone`.** Need checksum-pinned provider versions committed in the
-crate repo — a lockfile, effectively — so a yanked or missing satellite release fails loudly at
-build time instead of silently pulling something else.
+crate repo — a lockfile, effectively — so a yanked or missing satellite release fails loudly.
 
-Python providers ship as their own images rather than into the main one, so no interpreter enters
-the default runtime.
+### Stubs in as many languages as we can get cheaply
 
-### Licensing
+The cost isn't *generating* stubs — that's one `protoc` invocation. It's **publishing and versioning
+a package per language**, and hand-rolled, that's where multi-language support rots.
 
-wrtag is **GPL-3.0**; crate is MIT. Separate processes over a documented protocol is aggregation,
-not linking — **crate itself stays MIT.** With the shim in `crate-ingest-wrtag`, that repo carries
-the GPL and the main repo stays clean, so it can import wrtag's Go packages directly.
+**`buf` solves exactly this.** Push to the Buf Schema Registry and it publishes generated SDKs to Go
+modules, PyPI, npm, Maven, Cargo, NuGet, and Swift Package Manager automatically — one config instead
+of seven pipelines. ([BSR generated SDKs](https://buf.build/docs/bsr/generated-sdks/))
 
-beets is **MIT** — no constraint at all.
+The `.proto` files stay the canonical artifact; BSR gives pre-built SDKs on top.
 
 ---
 
@@ -648,34 +692,43 @@ beets is **MIT** — no constraint at all.
 | Phase | What | Why this order |
 | --- | --- | --- |
 | 0 | RC pipeline | Can't dogfood v2 without it |
-| 1 | Provider config schema | Cross-cutting; everything after it depends on it |
+| 1 | Provider config schema | Cross-cutting; everything after depends on it |
 | 2 | `NotificationProvider` | Interface already exists; proves the pattern at near-zero blast radius |
-| 3 | `IngestProvider` + default implementation | The hard one |
+| 3 | `IngestProvider` contract + `sleeve` | Extraction, not a rewrite — behavior must be identical |
 | 4 | State-machine refactor | Ships **with** phase 3 — same change |
-| 5 | Second ingest provider | Validates the contract against a second implementation *and* a second language |
+| 5 | `passthrough` + `staged` state | Closes issue #13; validates the contract against a second shape |
 | 6 | `DownloadProvider` + slskd | Highest risk, least external demand |
 | 7 | Lidarr shim expansion | Independent; can slot anywhere after phase 4 |
 | 8 | Repo split + rebrand + docs | README, CLAUDE.md, site/index.html, site/docs.html |
 
-Phases 3 and 4 are one unit of work, not two. Everything else can ship as an RC independently.
+Phases 3 and 4 are one unit of work. Everything else can ship as an RC independently.
 
 ## ADRs to write
 
-- Ingest as a provider — why crate exited the tagging/organizing business
-- No first-party tagging code — why MIT ruled out the only viable Go library
-- First-party providers never parse CLI output — the rule, and the exception policy
+- Ingest as a provider — why the seam exists even though we ship both implementations
+- Why crate ships no third-party ingester — wrtag can't do partial releases, beets destroys foreign tags
+- First-party providers never shell out — and why the rule needs no exceptions once we only ship our own
 - Catalog vs ingest — search metadata is not file metadata
 - Ownership by provider ref instead of file path
 - Two claims in, one verdict out — and why the verdict doesn't overwrite catalog identity
 - Inbound provider events over HTTP instead of bidirectional gRPC
 - Provider-declared config schemas
 - DownloadProvider shaped for Soulseek — why we didn't pre-generalize
-- Where the download policy/protocol line sits
 
-## Still open
+## Known gaps, deliberately carried
 
-1. **Which tool is the default ingest provider** — wrtag or beets. Blocked on two questions: wrtag's
-   real programmatic surface, and whether beets' Python API can organize with supplied identity
-   without the autotagger. Settle before phase 3.
-2. **`MetadataProvider` → `CatalogProvider`?** Recommending the rename; "metadata" now collides with
-   what ingest providers own. Cheap now, expensive after third parties write providers.
+Neither of these blocks v2. Recorded so they're a choice rather than an oversight.
+
+**Format coverage.** `sleeve` inherits v1's behavior exactly: tags MP3, FLAC and WAV; silently
+no-ops on ogg/opus/aac/m4a. Not a v2 concern.
+
+Two notes for whenever it *is* one. First, the downloader currently **accepts formats the tagger
+can't handle**, so a user can end up with untagged files in their library — a small standalone bug
+worth its own issue, independent of all of this. Second, if closing the gap ever matters, the
+licensing path is easier than it looks: TagLib upstream is dual-licensed LGPL-2.1 **or** MPL-1.1
+(it ships both `COPYING.LGPL` and `COPYING.MPL`), and MPL permits linking into an MIT work. Only
+Senan's Go wrapper is LGPL-only — so the options are ask him to match his own upstream, or write a
+fresh MIT wrapper over the MPL-licensed wasm blob. Never blocked, just not needed today.
+
+**Naming template expressiveness.** `sleeve` inherits 7 tokens and one modifier. Issue #1 proved
+users care about layout control, so this will come up. Backlog.
