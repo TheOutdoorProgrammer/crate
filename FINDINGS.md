@@ -1,19 +1,23 @@
 # v2 Plan Audit — Findings
 
-Twelve independent reviewers, one per section of `PLAN.md`, each reading the actual source and
+Twelve independent reviewers, one per section of `V2-Plan.md`, each reading the actual source and
 citing `file:line`. Several ran code to confirm. This is the output.
 
-**Read this before `PLAN.md`.** The audit found bugs *in the plan* and bugs *in shipped v1 code*, and the second category is worth acting on regardless of whether v2 ever happens.
+**Read this before `V2-Plan.md`.** The audit found bugs *in the plan* and bugs *in shipped v1 code*, and the second category is worth acting on regardless of whether v2 ever happens.
 
 A thirteenth reviewer then read both documents and the source, and spot-checked ~25 of these against the code.
 Most held.
 The ones that didn't are marked ⚠️ inline and corrected in place — B12, B17, B18, B26, X4 — plus one bug the twelve missed entirely (B11b).
-Where a claim here and a claim in `PLAN.md` disagree, this file is the corrected one.
+Where a claim here and a claim in `V2-Plan.md` disagree, this file is the corrected one.
+
+**Line citations are against revision 6** — the version that was audited.
+The plan has been revised twice since, so `V2-Plan.md:340` will not point at the text being quoted.
+Use the surrounding description to find it; the prose identifies each claim well enough to locate it in any revision.
 
 Sections:
 
 - [Ship now — v1 bugs](#ship-now--v1-bugs) — real defects in shipped code, independent of v2
-- [Corrections to the plan](#corrections-to-the-plan) — where PLAN.md is wrong
+- [Corrections to the plan](#corrections-to-the-plan) — where V2-Plan.md is wrong
 - [Contract gaps](#contract-gaps) — what the proto needs that nobody specced
 - [Cross-section conflicts](#cross-section-conflicts) — where reviewers disagreed
 - [Decisions needed](#decisions-needed) — Joey's calls
@@ -89,39 +93,39 @@ None of these need v2. Several are cheaper to fix *before* the refactor, because
 
 ## Corrections to the plan
 
-Things `PLAN.md` states that are wrong. Ordered by consequence.
+Things `V2-Plan.md` states that are wrong. Ordered by consequence.
 
 ### C1 — Quality-upgrade ordering is inverted into a data-loss order
 
-`PLAN.md:340` says `Remove(old_ref)` then `Place(new)`. **v1 does the opposite and v1 is right**: rename the new file into place, *then* delete the replaced one. Delete-first means a `Place` that fails after the `Remove` succeeded leaves the user with **neither file**, on an operation labeled "upgrade" — and on Soulseek the source peer may never come back.
+`V2-Plan.md:340` says `Remove(old_ref)` then `Place(new)`. **v1 does the opposite and v1 is right**: rename the new file into place, *then* delete the replaced one. Delete-first means a `Place` that fails after the `Remove` succeeded leaves the user with **neither file**, on an operation labeled "upgrade" — and on Soulseek the source peer may never come back.
 
 Required everywhere: **`Place` → persist the new ref → `Remove(old)`.** Caught independently by two reviewers.
 
 ### C2 — Ref backfill would hand `sleeve` delete rights over files it never placed
 
-`PLAN.md:546` says refs backfill from paths. But `file_path` is **relative when crate placed it, absolute when the importer adopted it** — absolute means a user-managed file outside the library, and there is a test that exists solely to protect those. Rule: **relative ⇒ backfill a ref; absolute ⇒ no ref, ever.**
+`V2-Plan.md:546` says refs backfill from paths. But `file_path` is **relative when crate placed it, absolute when the importer adopted it** — absolute means a user-managed file outside the library, and there is a test that exists solely to protect those. Rule: **relative ⇒ backfill a ref; absolute ⇒ no ref, ever.**
 
 Stronger recommendation from the state-machine review: **don't backfill in SQL at all.** Crate doesn't know which ingest provider the user will configure. Adopt refs on first boot from a provider-driven `Resync`/`Identify` pass, matched against the existing `file_path` cache.
 
 ### C3 — `MetadataProvider` does not exist
 
-The service is **`MusicProvider`**. `MetadataProvider` appears **zero times** in the tree. `PLAN.md:52` states an entire section's premise against a symbol that isn't there.
+The service is **`MusicProvider`**. `MetadataProvider` appears **zero times** in the tree. `V2-Plan.md:52` states an entire section's premise against a symbol that isn't there.
 
 Worse, and found independently by three reviewers: **the provider registry has no concept of provider *kind*.** Not in `ProviderConfig`, not in `CRATE_PROVIDERS` (`name:binary:port`), not in `InfoResponse`, not in the DB, not in the UI. It's a flat `map[string]*providerConn` holding a `pb.MusicProviderClient`. So the Settings "Default Provider" dropdown would happily offer `sleeve` as your catalog provider, and `handleUpdateSettings` validates nothing.
 
 **Consequence: phase 2 is not "near-zero blast radius" — it is the forcing function for a registry refactor that appears nowhere in the plan.**
 
-Free win: **take provider kind from `Info` rather than config**, and the `CRATE_PROVIDERS` breaking change at `PLAN.md:641` evaporates entirely.
+Free win: **take provider kind from `Info` rather than config**, and the `CRATE_PROVIDERS` breaking change at `V2-Plan.md:641` evaporates entirely.
 
 ### C4 — The inbound reject key is unsafe
 
-`PLAN.md:483` claims `POST /api/tracks/reject` takes `{artist, title}` — "exactly what MA hands you." Both halves are wrong. MA's payload has **no artist field**, and that endpoint is `WHERE artist = ? AND title = ? LIMIT 1` with **no album scope**, on a **destructive** operation. "Creep" exists on *Pablo Honey*, reissues, and three compilations. Wrong match = wrong file deleted and a good source permanently blacklisted.
+`V2-Plan.md:483` claims `POST /api/tracks/reject` takes `{artist, title}` — "exactly what MA hands you." Both halves are wrong. MA's payload has **no artist field**, and that endpoint is `WHERE artist = ? AND title = ? LIMIT 1` with **no album scope**, on a **destructive** operation. "Creep" exists on *Pablo Honey*, reissues, and three compilations. Wrong match = wrong file deleted and a good source permanently blacklisted.
 
 **Fix: send evidence, not a key.** A locator bundle (`path?`, `mbid?`, `artist?`, `title?`, `album?`, `duration_ms?`) resolved by crate's own matching ladder, refusing on ambiguity. That ladder already exists and is already tuned.
 
 ### C5 — The `release.yml` fix in the plan is broken, empirically
 
-`PLAN.md:135-136` proposes `${{ contains(...) && '--prerelease' || '' }}` with a `\` continuation in a **plain** YAML scalar. YAML parses first, and the trailing backslash-space folds into a backslash-escaped space, which bash turns into a literal-space word, which `gh release create` treats as an asset path.
+`V2-Plan.md:135-136` proposes `${{ contains(...) && '--prerelease' || '' }}` with a `\` continuation in a **plain** YAML scalar. YAML parses first, and the trailing backslash-space folds into a backslash-escaped space, which bash turns into a literal-space word, which `gh release create` treats as an asset path.
 
 **Both branches fail** — prerelease and GA. Verified with PyYAML + bash argv inspection. It only works under a block scalar (`run: |`).
 
@@ -137,7 +141,7 @@ Go requires a `/v2` module path suffix for major version ≥ 2, and the `+incomp
 
 ### C7 — BSR does not publish to public package registries
 
-`PLAN.md:682-684` claims the Buf Schema Registry publishes SDKs "to Go modules, PyPI, npm, Maven, Cargo, NuGet, and Swift Package Manager." It publishes to **Buf-hosted** registries — Python users need `--extra-index-url https://buf.build/gen/python`, npm users need to repoint the `@buf` scope. That's *more* friction than running `protoc`, not less. Go is the only language where it's transparent, and Go authors already work today.
+`V2-Plan.md:682-684` claims the Buf Schema Registry publishes SDKs "to Go modules, PyPI, npm, Maven, Cargo, NuGet, and Swift Package Manager." It publishes to **Buf-hosted** registries — Python users need `--extra-index-url https://buf.build/gen/python`, npm users need to repoint the `@buf` scope. That's *more* friction than running `protoc`, not less. Go is the only language where it's transparent, and Go authors already work today.
 
 **But `buf lint` + `buf breaking` are genuinely valuable — and the existing proto fails 5 of 6 buf STANDARD rules** (package/directory mismatch, `SERVICE_SUFFIX`, request/response naming, shared request message). That's a full service + message rename, which is a contract break — and the only free moment to make it is *before* the v2 contract is public.
 
@@ -151,13 +155,13 @@ That's a strictly better outcome than BSR for the same effort, as long as nobody
 
 ### C8 — "Crate never re-acquires on an inference" is already violated, four ways
 
-The invariant is good. It is not currently true: reject marks `wanted` after a refused delete (B6); reject-by-name is an identity inference on a destructive path (C4); `handleQueueTrack` has no status guard (B11); and **passthrough's find mode violates it by design** — `PLAN.md:436` admits a file retagged beyond recognition gets re-downloaded.
+The invariant is good. It is not currently true: reject marks `wanted` after a refused delete (B6); reject-by-name is an identity inference on a destructive path (C4); `handleQueueTrack` has no status guard (B11); and **passthrough's find mode violates it by design** — `V2-Plan.md:436` admits a file retagged beyond recognition gets re-downloaded.
 
 Honest restatement: **"Crate never re-acquires on an inference *it* made. A provider may declare a file gone, and that declaration is authoritative."** That relocates the risk into the contract, where it belongs with a MUST about not declaring loss cheaply.
 
 And the missing sibling, right as the plan removes the global `library.Contains` gate: **"never delete on an inference."** That's the more expensive of the two to get wrong.
 
-### C9 — `PLAN.md:393` describes something a provider cannot do
+### C9 — `V2-Plan.md:393` describes something a provider cannot do
 
 It says passthrough's find mode reconciles "by the same recording-ID → release-track → title ladder crate's importer already uses." **That ladder is three SQL queries against crate's tables.** A provider has no database, and the plan forbids it one. Find mode is a file-tags-to-file-tags match — a different algorithm with different failure modes, never specified.
 
@@ -167,11 +171,11 @@ Providers never write crate's DB, so crate must decide at `Place`-response time 
 
 ### C11 — Ledger mode's "zero special-casing" claim is false
 
-`PLAN.md:423-428` says crate needs no special-casing because ledger's `Resync` just answers "everything's fine." Checked method by method: **1 of 5 holds.** `Search` returns empty while the UI offers recovery that can never succeed; `Found` must either read files (violating its own mode) or adopt blindly; `Remove` needs a distinct "unsupported by policy" result; and **quality upgrades are not a no-op at all** — `IsUpgradeable` runs off the track row with zero provider involvement, so the scheduler flips owned→wanted and re-enqueues on its own. Crate must **actively suppress** them.
+`V2-Plan.md:423-428` says crate needs no special-casing because ledger's `Resync` just answers "everything's fine." Checked method by method: **1 of 5 holds.** `Search` returns empty while the UI offers recovery that can never succeed; `Found` must either read files (violating its own mode) or adopt blindly; `Remove` needs a distinct "unsupported by policy" result; and **quality upgrades are not a no-op at all** — `IsUpgradeable` runs off the track row with zero provider involvement, so the scheduler flips owned→wanted and re-enqueues on its own. Crate must **actively suppress** them.
 
 ### C12 — Adding statuses to `status` is a table rebuild with three traps
 
-`PLAN.md:546` calls the migration "close to trivial." Adding `staged`/`lost` to the `CHECK` constraint requires SQLite's 12-step rebuild, and:
+`V2-Plan.md:546` calls the migration "close to trivial." Adding `staged`/`lost` to the `CHECK` constraint requires SQLite's 12-step rebuild, and:
 
 - goose runs migrations in a transaction, and **`PRAGMA foreign_keys` is a no-op inside a transaction**
 - the DB opens with `foreign_keys(on)`, so `DROP TABLE tracks` cascades → **wipes the download queue**, orphaning in-flight transfers
@@ -201,33 +205,33 @@ Also: **`confidence` has no consumer.** Every rung of crate's ladder is exact eq
 
 ### C15 — `catalog_claim` is missing `cover_url`
 
-The organizer reads it from `albums.cover_url` and hands it to the tagger. Ship the claim as specced at `PLAN.md:249-250` and **sleeve silently stops embedding cover art on day one of phase 3.** Also missing: `albumartist` (a distinct naming token), duration, and total-track-count.
+The organizer reads it from `albums.cover_url` and hands it to the tagger. Ship the claim as specced at `V2-Plan.md:249-250` and **sleeve silently stops embedding cover art on day one of phase 3.** Also missing: `albumartist` (a distinct naming token), duration, and total-track-count.
 
 ### C16 — The capability enum gates nothing
 
-All four values were audited and none changes crate behavior. `BATCH_PLACE` has no RPC behind it. `OFFLINE_IDENTIFY` has no stated consequence. `REQUIRES_RELEASE` exists for a provider the plan's own research disqualified. And `STABLE_REFS` **contradicts the plan**: `PLAN.md:429-432` says passthrough not declaring it is *why* a vanished file goes to `lost`, but `PLAN.md:239-241` already makes `lost` unconditional for any provider.
+All four values were audited and none changes crate behavior. `BATCH_PLACE` has no RPC behind it. `OFFLINE_IDENTIFY` has no stated consequence. `REQUIRES_RELEASE` exists for a provider the plan's own research disqualified. And `STABLE_REFS` **contradicts the plan**: `V2-Plan.md:429-432` says passthrough not declaring it is *why* a vanished file goes to `lost`, but `V2-Plan.md:239-241` already makes `lost` unconditional for any provider.
 
 Recommendation: ship `enum Capability { CAPABILITY_UNSPECIFIED = 0; }` plus a reserved range. Values arrive with their consumers. Trade the saved surface for the `Place` outcome enum (C10).
 
 ### C17 — The push channel is broken three ways
 
-- **`item_imported` does not fire for album imports.** beets' docs, verbatim. A hook wired as `PLAN.md:416` describes catches **zero** of a normal `beet import`. The right events are `item_moved`/`item_copied`, and there are **six** of them — one per import mode — so a correct recipe is five hook registrations.
+- **`item_imported` does not fire for album imports.** beets' docs, verbatim. A hook wired as `V2-Plan.md:416` describes catches **zero** of a normal `beet import`. The right events are `item_moved`/`item_copied`, and there are **six** of them — one per import mode — so a correct recipe is five hook registrations.
 - **The port isn't reachable.** Provider gRPC ports bind to localhost as child processes; the Dockerfile exposes only 6969. A provider-side endpoint needs a new `EXPOSE`, a compose mapping, and a k8s Service port.
 - **Container paths don't survive.** Crate sees `/app/library`, beets sees `/mnt/music`.
 
 Plus: **beets defaults to `copy: yes, move: no`**, so in the default config the staging file never moves at all — which quietly changes what every tracking mode does.
 
-Two reviewers independently concluded: **cut it, or route it through crate's existing HTTP API** (`POST /api/ingest/relocated {old_path, new_path}` → crate resolves via `FindTrackByPath` → calls the provider's already-required `Found`). Zero new ports, zero new proto, and it works for sleeve users too — the plan scoped it to passthrough for no reason. This also matches the decision the plan already made for notification inbound events at `PLAN.md:478-486`, which the passthrough section contradicts.
+Two reviewers independently concluded: **cut it, or route it through crate's existing HTTP API** (`POST /api/ingest/relocated {old_path, new_path}` → crate resolves via `FindTrackByPath` → calls the provider's already-required `Found`). Zero new ports, zero new proto, and it works for sleeve users too — the plan scoped it to passthrough for no reason. This also matches the decision the plan already made for notification inbound events at `V2-Plan.md:478-486`, which the passthrough section contradicts.
 
 ### C18 — `strict` mode contradicts the plan's own doctrine
 
-`PLAN.md:392` says strict "re-downloads forever." `PLAN.md:233-241` says `lost` is the safe default for any missing file from any provider and crate never re-acquires on an inference. Both cannot be true. Under the `lost` rule, strict produces an **unbounded manual-triage queue**, which is worse than what it was meant to prevent.
+`V2-Plan.md:392` says strict "re-downloads forever." `V2-Plan.md:233-241` says `lost` is the safe default for any missing file from any provider and crate never re-acquires on an inference. Both cannot be true. Under the `lost` rule, strict produces an **unbounded manual-triage queue**, which is worse than what it was meant to prevent.
 
 Both passthrough reviewers also argue **`find` should be the default**, not strict: the population that selects passthrough is by definition the population running an external tool.
 
 ### C19 — The plan contradicts itself on per-file vs per-release
 
-`PLAN.md:596` rejects wrtag *because* the \*arr ecosystem gets complete releases by construction while Soulseek is per-file — "crate is genuinely the different case." `PLAN.md:510-512` then justifies a Soulseek-shaped download contract on "slskd stays first-class; other implementations adapt." A torrent provider delivers one artifact satisfying 14 rows, which the per-track state machine cannot express.
+`V2-Plan.md:596` rejects wrtag *because* the \*arr ecosystem gets complete releases by construction while Soulseek is per-file — "crate is genuinely the different case." `V2-Plan.md:510-512` then justifies a Soulseek-shaped download contract on "slskd stays first-class; other implementations adapt." A torrent provider delivers one artifact satisfying 14 rows, which the per-track state machine cannot express.
 
 **Stop selling the download contract as pluggability. Sell it as extraction**, and ship a second implementer that actually validates it.
 
@@ -241,7 +245,7 @@ Also worth knowing: the plan's claim that `{{major}}.{{minor}}` "already no-ops 
 
 ## Contract gaps
 
-Things the proto needs that `PLAN.md` doesn't specify. Consolidated from all twelve reviews.
+Things the proto needs that `V2-Plan.md` doesn't specify. Consolidated from all twelve reviews.
 
 ### IngestProvider
 
@@ -273,7 +277,7 @@ Things the proto needs that `PLAN.md` doesn't specify. Consolidated from all twe
 - **`ConfigField` needs `requires_restart`.** Eight settings hot-reload today; every one silently becomes restart-required unless push-on-save is a contract MUST.
 - **`ConfigField` needs `PATH`** (4 users, highest blast radius, only type with real validation semantics) and a **repeated/list type** for `library_roots`. `BOOL` and `TEXT` have **zero** users.
 - **Conditional field visibility.** passthrough's library dir is required in find mode and meaningless in ledger mode — not expressible today.
-- **Ledger mode is a config value, not a capability**, so the frontend would have to hardcode one provider's config semantics to honor `PLAN.md:402`. Needs effective-behavior flags (`supports_upgrade` / `supports_reject`) computed after config is applied.
+- **Ledger mode is a config value, not a capability**, so the frontend would have to hardcode one provider's config semantics to honor `V2-Plan.md:402`. Needs effective-behavior flags (`supports_upgrade` / `supports_reject`) computed after config is applied.
 - **Three HTTP endpoints the UI cannot function without are specced nowhere**: provider config schema + values, provider capabilities, and lost-file search/found. The plan defines all three as gRPC between crate and the provider and never crosses the HTTP boundary the frontend actually consumes. Plus a job-cancel endpoint — a multi-hour operation with no cancel is unacceptable on a phone.
 - **Provider persistent state is unaddressed.** Ledger mode requires a ledger; providers can't write crate's DB. So passthrough needs its own store → volume → backup → migrations. This is a packaging blocker, not a detail.
 
